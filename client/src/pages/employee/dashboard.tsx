@@ -1504,6 +1504,22 @@ export default function EmployeeDashboard() {
   const breaks = todayStatus?.breaks || [];
   const activeBreak = todayStatus?.activeBreak;
   const isOnBreak = !!activeBreak;
+
+  const isEveningUnlocked = useMemo(() => {
+    // If user has open shift type, always allow
+    if (user?.shiftType === "open") return true;
+
+    // If user has two shifts, check time
+    if (user?.shiftType === "two_shifts" && user.eveningShiftStart) {
+      const [hours, minutes] = user.eveningShiftStart.split(":").map(Number);
+      const shiftStart = new Date();
+      shiftStart.setHours(hours, minutes, 0, 0);
+
+      return currentTime >= shiftStart;
+    }
+
+    return false;
+  }, [user, currentTime]);
   const hasSubmittedReport = todayStatus?.hasSubmittedReport || false;
 
   useEffect(() => {
@@ -1745,8 +1761,19 @@ export default function EmployeeDashboard() {
               <span className="font-mono text-lg font-semibold text-slate-900 dark:text-white tabular-nums">{format(currentTime, "HH:mm:ss")}</span>
             </div>
             <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/50">
-              <button onClick={() => setActiveTab("morning")} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeTab === "morning" ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}><Sun className="w-4 h-4" />Morning</button>
-              <button disabled className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed text-slate-400"><Moon className="w-4 h-4" />Evening</button>
+              <button
+                onClick={() => setActiveTab("morning")}
+                className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeTab === "morning" ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
+              >
+                <Sun className="w-4 h-4" />Morning
+              </button>
+              <button
+                onClick={() => isEveningUnlocked && setActiveTab("evening")}
+                disabled={!isEveningUnlocked}
+                className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeTab === "evening" ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700", !isEveningUnlocked && "opacity-50 cursor-not-allowed")}
+              >
+                <Moon className="w-4 h-4" />Evening
+              </button>
             </div>
           </div>
         </div>

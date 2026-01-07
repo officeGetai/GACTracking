@@ -6,6 +6,8 @@ const PAKISTAN_TIMEZONE_OFFSET = 5 * 60; // 5 hours in minutes
 interface Employee {
   fullName: string;
   department: string;
+  phone?: string | null;
+  whatsappPreference?: string | null; // "both", "breaks_only", "shift_reports_only", "none"
 }
 
 export interface WasenderSettings {
@@ -22,10 +24,10 @@ function getPakistanTime(): Date {
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
     minute: '2-digit',
-    hour12: true 
+    hour12: true
   });
 }
 
@@ -36,37 +38,95 @@ function getSessionType(date: Date): string {
   return "Evening";
 }
 
-async function sendWhatsAppMessage(text: string, settings: WasenderSettings): Promise<boolean> {
-  // Skip if not configured or not active
-  if (!settings.apiToken || !settings.groupId || !settings.isActive) {
-    console.log("WASENDER not configured or not active, skipping notification");
-    return false;
-  }
-  
+/**
+ * Send WhatsApp message to a specific target (Group ID or Phone Number)
+ */
+async function sendToTarget(target: string, text: string, token: string): Promise<boolean> {
   try {
     const response = await fetch(WASENDER_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${settings.apiToken}`,
+        "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        to: settings.groupId,
+        to: target,
         text,
       }),
     });
-    
+
     if (!response.ok) {
-      console.error("WASENDER API error:", await response.text());
+      console.error(`WASENDER API error for target ${target}:`, await response.text());
       return false;
     }
-    
-    console.log("WhatsApp notification sent successfully");
+
     return true;
   } catch (error) {
-    console.error("Failed to send WhatsApp notification:", error);
+    console.error(`Failed to send WhatsApp notification to ${target}:`, error);
     return false;
   }
+}
+
+/**
+ * Main function to handle notification logic based on preferences
+ */
+async function sendNotification(
+  message: string,
+  employee: Employee,
+  settings: WasenderSettings,
+  notificationType: "shift" | "break" | "report"
+): Promise<void> {
+  // Skip if not configured or not active
+  if (!settings.apiToken || !settings.isActive) {
+    console.log("WASENDER not fully configured or not active, skipping notification");
+    return;
+  }
+
+  const targets: string[] = [];
+  const preference = employee.whatsappPreference || "both"; // Default to both if not set
+
+  // 1. Determine if we should send to Group
+  if (settings.groupId) {
+    targets.push(settings.groupId);
+  }
+
+  // 2. Determine if we should send to Individual
+  // Check if employee has a phone number and their preference allows this notification type
+  const shouldSendToIndividual =
+    employee.phone &&
+    (preference === "both" ||
+      (preference === "shift_reports_only" && (notificationType === "report" || notificationType === "shift")) ||
+      (preference === "breaks_only" && notificationType === "break"));
+
+  if (shouldSendToIndividual && employee.phone) {
+    targets.push(employee.phone);
+  }
+
+  if (targets.length === 0) {
+    console.log("No targets to send WhatsApp notification to.");
+    return;
+  }
+
+  console.log(`Sending WhatsApp notification (${notificationType}) to ${targets.length} targets...`);
+
+  // Send to all targets in parallel
+  // Send to all targets sequentially with delay to avoid rate limits
+  let successCount = 0;
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+
+    // Add delay if not the first message
+    if (i > 0) {
+      console.log("Waiting 7 seconds before next message to respect rate limits...");
+      await new Promise(resolve => setTimeout(resolve, 7000));
+    }
+
+    const success = await sendToTarget(target, message, settings.apiToken!);
+    if (success) successCount++;
+  }
+
+  console.log(`WhatsApp notifications sent: ${successCount}/${targets.length} successful.`);
 }
 
 export async function notifyShiftStart(employee: Employee, settings: WasenderSettings): Promise<void> {
@@ -80,7 +140,7 @@ export async function notifyShiftStart(employee: Employee, settings: WasenderSet
 
 ✅ Employee has checked in successfully.`;
 
-  await sendWhatsAppMessage(message, settings);
+  await sendNotification(message, employee, settings, "shift");
 }
 
 export async function notifyShiftEnd(
@@ -95,11 +155,11 @@ export async function notifyShiftEnd(
   const now = getPakistanTime();
   const workedHours = Math.floor(totalWorkedMinutes / 60);
   const workedMins = totalWorkedMinutes % 60;
-  
+
   // Convert shift start time to Pakistan time
   const utcStartTime = shiftStartTime.getTime() + (shiftStartTime.getTimezoneOffset() * 60000);
   const startTimePKT = new Date(utcStartTime + (PAKISTAN_TIMEZONE_OFFSET * 60000));
-  
+
   const message = `🔴 SHIFT REPORT
 
 ⌛ Late By: ${lateMinutes} minutes
@@ -117,16 +177,16 @@ export async function notifyShiftEnd(
 
 ✅ Employee has checked out successfully.`;
 
-  await sendWhatsAppMessage(message, settings);
+  await sendNotification(message, employee, settings, "shift");
 }
 
 export async function notifyBreakStart(employee: Employee, breakType: string, settings: WasenderSettings): Promise<void> {
   const now = getPakistanTime();
-  
-  const breakEmoji = breakType === "prayer" ? "🕌" : 
-                     breakType === "meal" ? "🍽️" : 
-                     breakType === "urgent" ? "🚨" : "☕";
-  
+
+  const breakEmoji = breakType === "prayer" ? "🕌" :
+    breakType === "meal" ? "🍽️" :
+      breakType === "urgent" ? "🚨" : "☕";
+
   const message = `${breakEmoji} BREAK STARTED
 
 👤 Employee: ${employee.fullName}
@@ -136,17 +196,17 @@ export async function notifyBreakStart(employee: Employee, breakType: string, se
 
 ⏸️ Employee is now on break.`;
 
-  await sendWhatsAppMessage(message, settings);
+  await sendNotification(message, employee, settings, "break");
 }
 
 export async function notifyBreakEnd(
-  employee: Employee, 
-  breakType: string, 
+  employee: Employee,
+  breakType: string,
   durationMinutes: number,
   settings: WasenderSettings
 ): Promise<void> {
   const now = getPakistanTime();
-  
+
   const message = `🚨 BREAK ENDED
 
 👤 Employee: ${employee.fullName}
@@ -157,7 +217,7 @@ export async function notifyBreakEnd(
 
 ▶️ Employee has resumed work.`;
 
-  await sendWhatsAppMessage(message, settings);
+  await sendNotification(message, employee, settings, "break");
 }
 
 export async function notifyDailyReportSubmitted(
@@ -166,7 +226,7 @@ export async function notifyDailyReportSubmitted(
   settings: WasenderSettings
 ): Promise<void> {
   const now = getPakistanTime();
-  
+
   const message = `📝 DAILY REPORT SUBMITTED
 
 👤 Employee: ${employee.fullName}
@@ -178,5 +238,5 @@ ${workDetails.substring(0, 200)}${workDetails.length > 200 ? '...' : ''}
 
 ✅ Report submitted successfully.`;
 
-  await sendWhatsAppMessage(message, settings);
+  await sendNotification(message, employee, settings, "report");
 }

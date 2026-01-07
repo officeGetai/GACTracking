@@ -1222,7 +1222,9 @@ export async function registerRoutes(
         getWasenderSettings().then(settings =>
           notifyShiftStart({
             fullName: `${user.firstName} ${user.lastName}`,
-            department: user.department || "Not Assigned"
+            department: user.department || "Not Assigned",
+            phone: user.phone,
+            whatsappPreference: user.whatsappPreference
           }, settings)
         ).catch(err => console.error("WhatsApp notification error:", err));
       }
@@ -1323,7 +1325,12 @@ export async function registerRoutes(
       if (user) {
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
-            { fullName: `${user.firstName} ${user.lastName}`, department: user.department || "Not Assigned" },
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
             new Date(shift.morningClockIn!),
             workMinutes - totalBreakMinutes,
             morningBreaks.length,
@@ -1438,7 +1445,9 @@ export async function registerRoutes(
         getWasenderSettings().then(settings =>
           notifyShiftStart({
             fullName: `${user.firstName} ${user.lastName}`,
-            department: user.department || "Not Assigned"
+            department: user.department || "Not Assigned",
+            phone: user.phone,
+            whatsappPreference: user.whatsappPreference
           }, settings)
         ).catch(err => console.error("WhatsApp notification error:", err));
       }
@@ -1538,7 +1547,12 @@ export async function registerRoutes(
       if (user) {
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
-            { fullName: `${user.firstName} ${user.lastName}`, department: user.department || "Not Assigned" },
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
             new Date(shift.eveningClockIn!),
             workMinutes - totalBreakMinutes,
             eveningBreaks.length,
@@ -1653,7 +1667,12 @@ export async function registerRoutes(
       if (user) {
         getWasenderSettings().then(settings =>
           notifyBreakStart(
-            { fullName: `${user.firstName} ${user.lastName}`, department: user.department || "Not Assigned" },
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
             type,
             settings
           )
@@ -1714,7 +1733,12 @@ export async function registerRoutes(
       if (user) {
         getWasenderSettings().then(settings =>
           notifyBreakEnd(
-            { fullName: `${user.firstName} ${user.lastName}`, department: user.department || "Not Assigned" },
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
             activeBreak.type,
             durationMinutes,
             settings
@@ -2252,7 +2276,12 @@ export async function registerRoutes(
       if (user) {
         getWasenderSettings().then(settings =>
           notifyDailyReportSubmitted(
-            { fullName: `${user.firstName} ${user.lastName}`, department: user.department || "Not Assigned" },
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
             reportData.workDetails,
             settings
           )
@@ -2867,80 +2896,80 @@ export async function registerRoutes(
     }
   });
 
-// server/routes.ts - Find the /api/admin/clickup/all-tasks route and update it
-app.get("/api/admin/clickup/all-tasks", requireAdmin, async (req, res) => {
-  try {
-    const { month } = req.query; // Expecting "YYYY-MM"
-    
-    if (!month) {
-      return res.status(400).json({ error: "Month parameter required (YYYY-MM)" });
-    }
+  // server/routes.ts - Find the /api/admin/clickup/all-tasks route and update it
+  app.get("/api/admin/clickup/all-tasks", requireAdmin, async (req, res) => {
+    try {
+      const { month } = req.query; // Expecting "YYYY-MM"
 
-    // 1. Calculate timestamps for the requested month
-    const [year, monthNum] = (month as string).split("-").map(Number);
-    // Start: 1st day of month 00:00:00
-    const startOfMonth = new Date(Date.UTC(year, monthNum - 1, 1, 0, 0, 0)).getTime();
-    // End: Last day of month 23:59:59
-    const endOfMonth = new Date(Date.UTC(year, monthNum, 0, 23, 59, 59, 999)).getTime();
+      if (!month) {
+        return res.status(400).json({ error: "Month parameter required (YYYY-MM)" });
+      }
 
-    // 2. Get all active Development employees from our DB
-    const allUsers = await storage.getAllUsers();
-    const devEmployees = allUsers.filter(u => 
-      u.department === "Development" && 
-      u.status === "active" && 
-      u.email
-    );
+      // 1. Calculate timestamps for the requested month
+      const [year, monthNum] = (month as string).split("-").map(Number);
+      // Start: 1st day of month 00:00:00
+      const startOfMonth = new Date(Date.UTC(year, monthNum - 1, 1, 0, 0, 0)).getTime();
+      // End: Last day of month 23:59:59
+      const endOfMonth = new Date(Date.UTC(year, monthNum, 0, 23, 59, 59, 999)).getTime();
 
-    // 3. Process each employee
-    const results = await Promise.all(devEmployees.map(async (employee) => {
-      try {
-        const clickUpUser = await findClickUpUserByEmail(employee.email!);
-        
-        if (!clickUpUser) {
+      // 2. Get all active Development employees from our DB
+      const allUsers = await storage.getAllUsers();
+      const devEmployees = allUsers.filter(u =>
+        u.department === "Development" &&
+        u.status === "active" &&
+        u.email
+      );
+
+      // 3. Process each employee
+      const results = await Promise.all(devEmployees.map(async (employee) => {
+        try {
+          const clickUpUser = await findClickUpUserByEmail(employee.email!);
+
+          if (!clickUpUser) {
+            return {
+              employee,
+              clickUpUser: null,
+              tasks: [],
+              taskCount: 0,
+              status: "not_linked"
+            };
+          }
+
+          // Fetch tasks for this specific user
+          const params = new URLSearchParams();
+          params.append("assignees[]", clickUpUser.id.toString());
+          params.append("include_closed", "true");
+          params.append("statuses[]", "complete");
+          params.append("space_ids[]", CLICKUP_CONFIG.SPACE_ID);
+          params.append("date_done_gt", startOfMonth.toString());
+          params.append("date_done_lt", endOfMonth.toString());
+
+          const data = await clickUpFetch(`/team/${CLICKUP_CONFIG.TEAM_ID}/task?${params.toString()}`);
+
           return {
             employee,
-            clickUpUser: null,
-            tasks: [],
-            taskCount: 0,
-            status: "not_linked"
+            clickUpUser,
+            tasks: data.tasks || [],
+            taskCount: data.tasks?.length || 0,
+            status: "linked"
           };
+        } catch (err) {
+          return { employee, tasks: [], taskCount: 0, status: "error", error: "API Failure" };
         }
+      }));
 
-        // Fetch tasks for this specific user
-        const params = new URLSearchParams();
-        params.append("assignees[]", clickUpUser.id.toString());
-        params.append("include_closed", "true");
-        params.append("statuses[]", "complete");
-        params.append("space_ids[]", CLICKUP_CONFIG.SPACE_ID);
-        params.append("date_done_gt", startOfMonth.toString());
-        params.append("date_done_lt", endOfMonth.toString());
+      // 4. Calculate Summary Totals
+      const totals = {
+        totalEmployees: devEmployees.length,
+        linkedEmployees: results.filter(r => r.status === "linked").length,
+        totalTasks: results.reduce((sum, r) => sum + r.taskCount, 0),
+      };
 
-        const data = await clickUpFetch(`/team/${CLICKUP_CONFIG.TEAM_ID}/task?${params.toString()}`);
-
-        return {
-          employee,
-          clickUpUser,
-          tasks: data.tasks || [],
-          taskCount: data.tasks?.length || 0,
-          status: "linked"
-        };
-      } catch (err) {
-        return { employee, tasks: [], taskCount: 0, status: "error", error: "API Failure" };
-      }
-    }));
-
-    // 4. Calculate Summary Totals
-    const totals = {
-      totalEmployees: devEmployees.length,
-      linkedEmployees: results.filter(r => r.status === "linked").length,
-      totalTasks: results.reduce((sum, r) => sum + r.taskCount, 0),
-    };
-
-    res.json({ month, employees: results, totals });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
+      res.json({ month, employees: results, totals });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
   // ============= NOTIFICATION ROUTES =============
 
   // Get recent notifications for employee
