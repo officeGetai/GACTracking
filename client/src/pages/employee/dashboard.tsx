@@ -1505,21 +1505,151 @@ export default function EmployeeDashboard() {
   const activeBreak = todayStatus?.activeBreak;
   const isOnBreak = !!activeBreak;
 
-  const isEveningUnlocked = useMemo(() => {
-    // If user has open shift type, always allow
-    if (user?.shiftType === "open") return true;
-
-    // If user has two shifts, check time
-    if (user?.shiftType === "two_shifts" && user.eveningShiftStart) {
-      const [hours, minutes] = user.eveningShiftStart.split(":").map(Number);
-      const shiftStart = new Date();
-      shiftStart.setHours(hours, minutes, 0, 0);
-
-      return currentTime >= shiftStart;
+  // === COMPREHENSIVE SHIFT AVAILABILITY LOGIC ===
+  const shiftAvailability = useMemo(() => {
+    // For open shift type, always allow both shifts
+    if (user?.shiftType === "open") {
+      return {
+        isMorningUnlocked: true,
+        isEveningUnlocked: true,
+        isMorningLocked: false,
+        isEveningLocked: false,
+        morningMessage: "",
+        eveningMessage: "",
+        morningLockReason: null as "not_started" | "ended" | null,
+        eveningLockReason: null as "not_started" | "ended" | null,
+      };
     }
 
-    return false;
-  }, [user, currentTime]);
+    // For single shift type, only morning is available
+    if (user?.shiftType !== "two_shifts") {
+      return {
+        isMorningUnlocked: true,
+        isEveningUnlocked: false,
+        isMorningLocked: false,
+        isEveningLocked: true,
+        morningMessage: "",
+        eveningMessage: "Evening shift not enabled",
+        morningLockReason: null,
+        eveningLockReason: "not_started" as const,
+      };
+    }
+
+    const now = currentTime;
+
+    // Helper to parse time string to Date
+    const parseTime = (timeStr: string | undefined): Date | null => {
+      if (!timeStr) return null;
+      const [h, m] = timeStr.split(":").map(Number);
+      const d = new Date(now);
+      d.setHours(h, m, 0, 0);
+      return d;
+    };
+
+    // Parse all shift times
+    const morningStart = parseTime(user?.morningShiftStart);
+    const morningEnd = parseTime(user?.morningShiftEnd);
+    const eveningStart = parseTime(user?.eveningShiftStart);
+    const eveningEnd = parseTime(user?.eveningShiftEnd);
+
+    // Determine time window states
+    const isBeforeMorning = morningStart && now < morningStart;
+    const isInMorningWindow = morningStart && morningEnd && now >= morningStart && now < morningEnd;
+    const isMorningPassed = morningEnd && now >= morningEnd;
+
+    const isBeforeEvening = eveningStart && now < eveningStart;
+    const isInEveningWindow = eveningStart && eveningEnd && now >= eveningStart && now < eveningEnd;
+    const isEveningPassed = eveningEnd && now >= eveningEnd;
+
+    // Initialize states
+    let isMorningUnlocked = false;
+    let isEveningUnlocked = false;
+    let isMorningLocked = false;
+    let isEveningLocked = false;
+    let morningMessage = "";
+    let eveningMessage = "";
+    let morningLockReason: "not_started" | "ended" | null = null;
+    let eveningLockReason: "not_started" | "ended" | null = null;
+
+    // Morning shift availability logic
+    if (isBeforeMorning) {
+      isMorningLocked = true;
+      morningLockReason = "not_started";
+      morningMessage = `Unlocks at ${format(morningStart!, "hh:mm a")}`;
+    } else if (isInMorningWindow) {
+      isMorningUnlocked = true;
+      morningMessage = "";
+    } else if (isMorningPassed) {
+      // Check if there's an active shift in progress
+      if (shift?.morningClockIn && !shift?.morningClockOut) {
+        isMorningUnlocked = true;
+        morningMessage = "Overtime - please end your shift";
+      } else {
+        isMorningLocked = true;
+        morningLockReason = "ended";
+        morningMessage = "Morning shift time ended";
+      }
+    }
+
+    // Evening shift availability logic
+    if (isBeforeEvening) {
+      isEveningLocked = true;
+      eveningLockReason = "not_started";
+      eveningMessage = `Unlocks at ${format(eveningStart!, "hh:mm a")}`;
+    } else if (isInEveningWindow) {
+      isEveningUnlocked = true;
+      eveningMessage = "";
+
+      // Lock morning if passed and no active morning shift
+      if (isMorningPassed && !(shift?.morningClockIn && !shift?.morningClockOut)) {
+        isMorningLocked = true;
+        isMorningUnlocked = false;
+        morningLockReason = "ended";
+        morningMessage = "Morning shift time ended";
+      }
+    } else if (isEveningPassed) {
+      if (shift?.eveningClockIn && !shift?.eveningClockOut) {
+        isEveningUnlocked = true;
+        eveningMessage = "Overtime - please end your shift";
+      } else {
+        isEveningLocked = true;
+        eveningLockReason = "ended";
+        eveningMessage = "Evening shift time ended";
+      }
+    }
+
+    return {
+      isMorningUnlocked,
+      isEveningUnlocked,
+      isMorningLocked,
+      isEveningLocked,
+      morningMessage,
+      eveningMessage,
+      morningLockReason,
+      eveningLockReason,
+    };
+  }, [user, currentTime, shift]);
+
+  const {
+    isMorningUnlocked,
+    isEveningUnlocked,
+    isMorningLocked,
+    isEveningLocked,
+    morningMessage,
+    eveningMessage,
+    morningLockReason,
+    eveningLockReason
+  } = shiftAvailability;
+
+  // Auto-switch to appropriate shift tab
+  useEffect(() => {
+    if (activeTab === "morning" && isMorningLocked && isEveningUnlocked) {
+      setActiveTab("evening");
+    } else if (activeTab === "evening" && isEveningLocked && isMorningUnlocked) {
+      setActiveTab("morning");
+    }
+  }, [isMorningUnlocked, isEveningUnlocked, isMorningLocked, isEveningLocked, activeTab]);
+
   const hasSubmittedReport = todayStatus?.hasSubmittedReport || false;
 
   useEffect(() => {
@@ -1595,6 +1725,11 @@ export default function EmployeeDashboard() {
   const canEndShift = isActive && hasSubmittedReport && !isOnBreak;
   const needsReportToEnd = isActive && !hasSubmittedReport;
 
+  // Check if current tab's shift is locked
+  const isCurrentShiftLocked = activeTab === "morning" ? isMorningLocked : isEveningLocked;
+  const currentShiftMessage = activeTab === "morning" ? morningMessage : eveningMessage;
+  const currentLockReason = activeTab === "morning" ? morningLockReason : eveningLockReason;
+
   const calculateProgress = () => {
     if (!currentStart) return 0;
     const targetSeconds = 8 * 60 * 60;
@@ -1633,10 +1768,37 @@ export default function EmployeeDashboard() {
   const [isStartingBreak, setIsStartingBreak] = useState(false);
   const [isEndingBreak, setIsEndingBreak] = useState(false);
 
-  const startShift = async () => { setIsStartingShift(true); await handleMutation(apiRequest("POST", `/api/employee/shift/${activeTab}/start`), `${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} shift started`); setIsStartingShift(false); };
-  const endShift = async () => { if (!hasSubmittedReport) { setReportDialogOpen(true); return; } setIsEndingShift(true); await handleMutation(apiRequest("POST", `/api/employee/shift/${activeTab}/end`), `${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} shift ended`, () => setEndShiftDialogOpen(false)); setIsEndingShift(false); };
-  const startBreak = async () => { if (!selectedBreakType) { toast({ title: "Select Break Type", description: "Please select a break type first", variant: "destructive" }); return; } setIsStartingBreak(true); await handleMutation(apiRequest("POST", "/api/employee/break/start", { type: selectedBreakType }), `${selectedBreakType.charAt(0).toUpperCase() + selectedBreakType.slice(1)} break started`, () => setSelectedBreakType("")); setIsStartingBreak(false); };
-  const endBreak = async () => { setIsEndingBreak(true); await handleMutation(apiRequest("POST", "/api/employee/break/end"), "Break ended"); setIsEndingBreak(false); };
+  const startShift = async () => {
+    setIsStartingShift(true);
+    await handleMutation(apiRequest("POST", `/api/employee/shift/${activeTab}/start`), `${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} shift started`);
+    setIsStartingShift(false);
+  };
+
+  const endShift = async () => {
+    if (!hasSubmittedReport) {
+      setReportDialogOpen(true);
+      return;
+    }
+    setIsEndingShift(true);
+    await handleMutation(apiRequest("POST", `/api/employee/shift/${activeTab}/end`), `${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} shift ended`, () => setEndShiftDialogOpen(false));
+    setIsEndingShift(false);
+  };
+
+  const startBreak = async () => {
+    if (!selectedBreakType) {
+      toast({ title: "Select Break Type", description: "Please select a break type first", variant: "destructive" });
+      return;
+    }
+    setIsStartingBreak(true);
+    await handleMutation(apiRequest("POST", "/api/employee/break/start", { type: selectedBreakType }), `${selectedBreakType.charAt(0).toUpperCase() + selectedBreakType.slice(1)} break started`, () => setSelectedBreakType(""));
+    setIsStartingBreak(false);
+  };
+
+  const endBreak = async () => {
+    setIsEndingBreak(true);
+    await handleMutation(apiRequest("POST", "/api/employee/break/end"), "Break ended");
+    setIsEndingBreak(false);
+  };
 
   const handleLoomLinkChange = (value: string) => {
     setLoomLinks(value);
@@ -1734,7 +1896,14 @@ export default function EmployeeDashboard() {
   };
 
   if (isLoading) {
-    return (<div className="flex items-center justify-center h-full"><div className="flex flex-col items-center gap-4"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /><p className="text-sm text-slate-500">Loading your dashboard...</p></div></div>);
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <p className="text-sm text-slate-500">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -1760,23 +1929,133 @@ export default function EmployeeDashboard() {
               <Clock className="w-4 h-4 text-slate-400" />
               <span className="font-mono text-lg font-semibold text-slate-900 dark:text-white tabular-nums">{format(currentTime, "HH:mm:ss")}</span>
             </div>
+
+            {/* Shift Tabs with Lock/Unlock Logic */}
             <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/50">
-              <button
-                onClick={() => setActiveTab("morning")}
-                className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeTab === "morning" ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
-              >
-                <Sun className="w-4 h-4" />Morning
-              </button>
-              <button
-                onClick={() => isEveningUnlocked && setActiveTab("evening")}
-                disabled={!isEveningUnlocked}
-                className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeTab === "evening" ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700", !isEveningUnlocked && "opacity-50 cursor-not-allowed")}
-              >
-                <Moon className="w-4 h-4" />Evening
-              </button>
+              {/* Morning Tab */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => !isMorningLocked && setActiveTab("morning")}
+                    disabled={isMorningLocked}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative",
+                      activeTab === "morning"
+                        ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm"
+                        : "text-slate-500 hover:text-slate-700",
+                      isMorningLocked && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    {isMorningLocked ? (
+                      <Lock className="w-4 h-4 text-slate-400" />
+                    ) : (
+                      <Sun className="w-4 h-4" />
+                    )}
+                    Morning
+                    {morningLockReason === "ended" && (
+                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                      </span>
+                    )}
+                  </button>
+                </TooltipTrigger>
+                {morningMessage && (
+                  <TooltipContent side="bottom" className="flex items-center gap-2">
+                    {morningLockReason === "not_started" ? (
+                      <Clock className="w-3 h-3" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 text-amber-500" />
+                    )}
+                    <p>{morningMessage}</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+
+              {/* Evening Tab */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => !isEveningLocked && isEveningUnlocked && setActiveTab("evening")}
+                    disabled={isEveningLocked || !isEveningUnlocked}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative",
+                      activeTab === "evening"
+                        ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm"
+                        : "text-slate-500 hover:text-slate-700",
+                      (isEveningLocked || !isEveningUnlocked) && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    {isEveningLocked || !isEveningUnlocked ? (
+                      <Lock className="w-4 h-4 text-slate-400" />
+                    ) : (
+                      <Moon className="w-4 h-4" />
+                    )}
+                    Evening
+                    {eveningLockReason === "ended" && (
+                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                      </span>
+                    )}
+                  </button>
+                </TooltipTrigger>
+                {eveningMessage && (
+                  <TooltipContent side="bottom" className="flex items-center gap-2">
+                    {eveningLockReason === "not_started" ? (
+                      <Clock className="w-3 h-3" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 text-amber-500" />
+                    )}
+                    <p>{eveningMessage}</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
             </div>
           </div>
         </div>
+
+        {/* Locked Shift Alert */}
+        {isCurrentShiftLocked && !isStarted && (
+          <Alert className={cn(
+            "border-slate-200 dark:border-slate-800",
+            currentLockReason === "ended"
+              ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
+              : "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
+          )}>
+            <Lock className={cn(
+              "h-4 w-4",
+              currentLockReason === "ended"
+                ? "text-red-600"
+                : "text-blue-600"
+            )} />
+            <AlertTitle className={
+              currentLockReason === "ended"
+                ? "text-red-800 dark:text-red-400"
+                : "text-blue-800 dark:text-blue-400"
+            }>
+              {activeTab === "morning" ? "Morning" : "Evening"} Shift Locked
+            </AlertTitle>
+            <AlertDescription className={
+              currentLockReason === "ended"
+                ? "text-red-700 dark:text-red-500"
+                : "text-blue-700 dark:text-blue-500"
+            }>
+              {currentShiftMessage}
+              {currentLockReason === "not_started" && (
+                <span className="block mt-1 text-sm">
+                  Please wait until the shift time begins to clock in.
+                </span>
+              )}
+              {currentLockReason === "ended" && (
+                <span className="block mt-1 text-sm">
+                  This shift window has passed. {isEveningUnlocked && activeTab === "morning" ? "Switch to evening shift." : ""}
+                  {isMorningUnlocked && activeTab === "evening" ? "Switch to morning shift." : ""}
+                </span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {needsReportToEnd && (
           <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
@@ -1792,7 +2071,7 @@ export default function EmployeeDashboard() {
           <div className="lg:col-span-2 space-y-6">
             <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white shadow-2xl">
               <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/20 rounded-full blur-3xl" />
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/20 rounded-full`):blur-3xl" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl" />
 
               <CardContent className="relative z-10 p-8">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -1813,50 +2092,178 @@ export default function EmployeeDashboard() {
                   </div>
 
                   <div className="flex flex-col items-center gap-4">
+                    {/* Start Shift Button with Lock Check */}
                     {!isStarted && (
-                      <Button size="lg" className="h-24 w-24 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-500 hover:to-emerald-700 shadow-lg shadow-emerald-500/30 border-4 border-emerald-400/30 transition-all hover:scale-105" onClick={startShift} disabled={isOnBreak || isStartingShift}>
-                        {isStartingShift ? <Loader2 className="w-10 h-10 animate-spin" /> : <Play className="w-10 h-10 fill-white" />}
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="lg"
+                            className={cn(
+                              "h-24 w-24 rounded-full shadow-lg border-4 transition-all",
+                              isCurrentShiftLocked
+                                ? "bg-gradient-to-br from-slate-400 to-slate-500 border-slate-300/30 cursor-not-allowed"
+                                : "bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-500 hover:to-emerald-700 shadow-emerald-500/30 border-emerald-400/30 hover:scale-105"
+                            )}
+                            onClick={startShift}
+                            disabled={isOnBreak || isStartingShift || isCurrentShiftLocked}
+                          >
+                            {isStartingShift ? (
+                              <Loader2 className="w-10 h-10 animate-spin" />
+                            ) : isCurrentShiftLocked ? (
+                              <Lock className="w-10 h-10" />
+                            ) : (
+                              <Play className="w-10 h-10 fill-white" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        {isCurrentShiftLocked && (
+                          <TooltipContent>
+                            <p>{currentShiftMessage}</p>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
                     )}
+
+                    {/* End Shift Button */}
                     {isActive && (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button size="lg" className={cn("h-24 w-24 rounded-full shadow-lg border-4 transition-all", canEndShift ? "bg-gradient-to-br from-red-400 to-red-600 hover:from-red-500 hover:to-red-700 shadow-red-500/30 border-red-400/30 hover:scale-105" : "bg-gradient-to-br from-slate-500 to-slate-600 border-slate-400/30 cursor-not-allowed")} onClick={() => { if (!hasSubmittedReport) setReportDialogOpen(true); else setEndShiftDialogOpen(true); }} disabled={isOnBreak || isEndingShift}>
-                            {isEndingShift ? <Loader2 className="w-8 h-8 animate-spin" /> : hasSubmittedReport ? <Square className="w-8 h-8 fill-white" /> : <Lock className="w-8 h-8" />}
+                          <Button
+                            size="lg"
+                            className={cn(
+                              "h-24 w-24 rounded-full shadow-lg border-4 transition-all",
+                              canEndShift
+                                ? "bg-gradient-to-br from-red-400 to-red-600 hover:from-red-500 hover:to-red-700 shadow-red-500/30 border-red-400/30 hover:scale-105"
+                                : "bg-gradient-to-br from-slate-500 to-slate-600 border-slate-400/30 cursor-not-allowed"
+                            )}
+                            onClick={() => {
+                              if (!hasSubmittedReport) setReportDialogOpen(true);
+                              else setEndShiftDialogOpen(true);
+                            }}
+                            disabled={isOnBreak || isEndingShift}
+                          >
+                            {isEndingShift ? (
+                              <Loader2 className="w-8 h-8 animate-spin" />
+                            ) : hasSubmittedReport ? (
+                              <Square className="w-8 h-8 fill-white" />
+                            ) : (
+                              <Lock className="w-8 h-8" />
+                            )}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>{hasSubmittedReport ? "Click to end shift" : "Submit report to unlock"}</TooltipContent>
                       </Tooltip>
                     )}
-                    {isEnded && (<div className="h-24 w-24 rounded-full bg-slate-700/50 flex items-center justify-center border-4 border-slate-600/30"><CheckCircle className="w-10 h-10 text-emerald-400" /></div>)}
-                    <p className="text-xs text-slate-400 font-medium text-center">{!isStarted && "Tap to clock in"}{isActive && !hasSubmittedReport && "Submit report first"}{isActive && hasSubmittedReport && "Tap to clock out"}{isEnded && "Shift completed"}</p>
+
+                    {/* Completed State */}
+                    {isEnded && (
+                      <div className="h-24 w-24 rounded-full bg-slate-700/50 flex items-center justify-center border-4 border-slate-600/30">
+                        <CheckCircle className="w-10 h-10 text-emerald-400" />
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-400 font-medium text-center">
+                      {!isStarted && !isCurrentShiftLocked && "Tap to clock in"}
+                      {!isStarted && isCurrentShiftLocked && currentShiftMessage}
+                      {isActive && !hasSubmittedReport && "Submit report first"}
+                      {isActive && hasSubmittedReport && "Tap to clock out"}
+                      {isEnded && "Shift completed"}
+                    </p>
                   </div>
                 </div>
 
                 <Separator className="my-6 bg-slate-700" />
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div><p className="text-xs text-slate-400 flex items-center gap-1.5"><LogIn className="w-3 h-3" />Clock In</p><p className="text-lg font-semibold">{currentStart ? format(new Date(currentStart), "hh:mm a") : "--:--"}</p></div>
-                  <div><p className="text-xs text-slate-400 flex items-center gap-1.5"><LogOut className="w-3 h-3" />Clock Out</p><p className="text-lg font-semibold">{currentEnd ? format(new Date(currentEnd), "hh:mm a") : "--:--"}</p></div>
-                  <div><p className="text-xs text-slate-400 flex items-center gap-1.5"><Coffee className="w-3 h-3" />Break Time</p><p className="text-lg font-semibold">{formatDurationShort(totalBreakSeconds)}</p></div>
-                  <div><p className="text-xs text-slate-400 flex items-center gap-1.5"><FileText className="w-3 h-3" />Report</p><p className="text-lg font-semibold flex items-center gap-2">{hasSubmittedReport ? <><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-400">Done</span></> : <><AlertCircle className="w-4 h-4 text-amber-400" /><span className="text-amber-400">Pending</span></>}</p></div>
+                  <div>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5"><LogIn className="w-3 h-3" />Clock In</p>
+                    <p className="text-lg font-semibold">{currentStart ? format(new Date(currentStart), "hh:mm a") : "--:--"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5"><LogOut className="w-3 h-3" />Clock Out</p>
+                    <p className="text-lg font-semibold">{currentEnd ? format(new Date(currentEnd), "hh:mm a") : "--:--"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5"><Coffee className="w-3 h-3" />Break Time</p>
+                    <p className="text-lg font-semibold">{formatDurationShort(totalBreakSeconds)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5"><FileText className="w-3 h-3" />Report</p>
+                    <p className="text-lg font-semibold flex items-center gap-2">
+                      {hasSubmittedReport ? (
+                        <><CheckCircle className="w-4 h-4 text-emerald-400" /><span className="text-emerald-400">Done</span></>
+                      ) : (
+                        <><AlertCircle className="w-4 h-4 text-amber-400" /><span className="text-amber-400">Pending</span></>
+                      )}
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card className="p-4"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30"><TargetIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" /></div><div><p className="text-xs text-slate-500">Target</p><p className="text-lg font-bold">8h</p></div></div></Card>
-              <Card className="p-4"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30"><Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /></div><div><p className="text-xs text-slate-500">Efficiency</p><p className="text-lg font-bold">{isStarted ? `${calculateEfficiency()}%` : "--"}</p></div></div></Card>
-              <Card className="p-4"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/30"><Coffee className="w-4 h-4 text-orange-600 dark:text-orange-400" /></div><div><p className="text-xs text-slate-500">Breaks</p><p className="text-lg font-bold">{(todayStatus?.breakCounts?.prayer || 0) + (todayStatus?.breakCounts?.meal || 0) + (todayStatus?.breakCounts?.urgent || 0)}/6</p></div></div></Card>
-              <Card className="p-4"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30"><Activity className="w-4 h-4 text-purple-600 dark:text-purple-400" /></div><div><p className="text-xs text-slate-500">Gross Time</p><p className="text-lg font-bold">{isStarted ? formatDurationShort(grossWorkedSeconds) : "--"}</p></div></div></Card>
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                    <TargetIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Target</p>
+                    <p className="text-lg font-bold">8h</p>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                    <Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Efficiency</p>
+                    <p className="text-lg font-bold">{isStarted ? `${calculateEfficiency()}%` : "--"}</p>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/30">
+                    <Coffee className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Breaks</p>
+                    <p className="text-lg font-bold">{(todayStatus?.breakCounts?.prayer || 0) + (todayStatus?.breakCounts?.meal || 0) + (todayStatus?.breakCounts?.urgent || 0)}/6</p>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30">
+                    <Activity className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Gross Time</p>
+                    <p className="text-lg font-bold">{isStarted ? formatDurationShort(grossWorkedSeconds) : "--"}</p>
+                  </div>
+                </div>
+              </Card>
             </div>
 
             {isActive && !hasSubmittedReport && (
               <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2"><div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/50"><FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" /></div><div><CardTitle className="text-base">Daily Report Required</CardTitle><p className="text-xs text-slate-500 mt-0.5">Submit your report to unlock shift ending</p></div></div>
-                    <Button onClick={() => setReportDialogOpen(true)} className="gap-2"><FileCheck className="w-4 h-4" />Submit Report</Button>
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/50">
+                        <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-base">Daily Report Required</CardTitle>
+                        <p className="text-xs text-slate-500 mt-0.5">Submit your report to unlock shift ending</p>
+                      </div>
+                    </div>
+                    <Button onClick={() => setReportDialogOpen(true)} className="gap-2">
+                      <FileCheck className="w-4 h-4" />Submit Report
+                    </Button>
                   </div>
                 </CardHeader>
               </Card>
@@ -1866,13 +2273,17 @@ export default function EmployeeDashboard() {
               <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-full bg-emerald-100 dark:bg-emerald-900/50"><CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" /></div>
+                    <div className="p-2 rounded-full bg-emerald-100 dark:bg-emerald-900/50">
+                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
                     <div className="flex-1">
                       <p className="font-medium text-emerald-800 dark:text-emerald-400">Report Submitted</p>
                       <p className="text-xs text-emerald-600 dark:text-emerald-500">You can now end your shift when ready</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setReportDialogOpen(true)} className="h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-100"><Edit3 className="w-3.5 h-3.5 mr-1" />Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setReportDialogOpen(true)} className="h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-100">
+                        <Edit3 className="w-3.5 h-3.5 mr-1" />Edit
+                      </Button>
                       <Badge className="bg-emerald-500"><Unlock className="w-3 h-3 mr-1" />Unlocked</Badge>
                     </div>
                   </div>
@@ -1886,7 +2297,15 @@ export default function EmployeeDashboard() {
             <Card className="border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl overflow-hidden">
               <CardHeader className="pb-3 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-b border-orange-100 dark:border-orange-900/30">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2"><div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/50"><Coffee className="w-4 h-4 text-orange-600 dark:text-orange-400" /></div><div><CardTitle className="text-base">Break Control</CardTitle><p className="text-xs text-slate-500 mt-0.5">{isOnBreak ? "Break in progress" : "Manage your breaks"}</p></div></div>
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/50">
+                      <Coffee className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Break Control</CardTitle>
+                      <p className="text-xs text-slate-500 mt-0.5">{isOnBreak ? "Break in progress" : "Manage your breaks"}</p>
+                    </div>
+                  </div>
                   {isOnBreak && <Badge className="bg-orange-500 text-white animate-pulse">Active</Badge>}
                 </div>
               </CardHeader>
@@ -1894,7 +2313,9 @@ export default function EmployeeDashboard() {
                 {isOnBreak ? (
                   <div className="space-y-4">
                     <div className="text-center p-6 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border border-orange-200 dark:border-orange-800">
-                      <div className="text-4xl font-bold text-orange-600 dark:text-orange-400 mb-2"><LiveDuration start={activeBreak?.startTime?.toString()} /></div>
+                      <div className="text-4xl font-bold text-orange-600 dark:text-orange-400 mb-2">
+                        <LiveDuration start={activeBreak?.startTime?.toString()} />
+                      </div>
                       <p className="text-sm text-slate-600 dark:text-slate-400 capitalize">{activeBreak?.type} Break</p>
                     </div>
                     <Button className="w-full bg-orange-600 hover:bg-orange-700" onClick={endBreak} disabled={isEndingBreak}>
@@ -1918,15 +2339,72 @@ export default function EmployeeDashboard() {
             </Card>
 
             <Card className="border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl flex-1 flex flex-col min-h-[250px]">
-              <CardHeader className="pb-3"><div className="flex items-center gap-2"><div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900/30"><Activity className="w-4 h-4 text-cyan-600 dark:text-cyan-400" /></div><CardTitle className="text-base">Today's Activity</CardTitle></div></CardHeader>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900/30">
+                    <Activity className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                  </div>
+                  <CardTitle className="text-base">Today's Activity</CardTitle>
+                </div>
+              </CardHeader>
               <CardContent className="p-0 flex-1 overflow-hidden">
                 <ScrollArea className="h-full">
                   <div className="p-4 space-y-3">
-                    {currentStart && (<div className="flex items-start gap-3"><div className="mt-0.5 p-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30"><LogIn className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /></div><div className="flex-1"><p className="text-sm font-medium text-slate-700 dark:text-slate-300">Clocked In</p><p className="text-xs text-slate-400">{format(new Date(currentStart), "hh:mm a")}</p></div></div>)}
-                    {breaks.map((brk, i) => (<div key={i} className="flex items-start gap-3"><div className="mt-0.5 p-1.5 rounded-full bg-orange-100 dark:bg-orange-900/30"><Coffee className="w-3 h-3 text-orange-600 dark:text-orange-400" /></div><div className="flex-1"><p className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">{brk.type} Break</p><p className="text-xs text-slate-400">{format(new Date(brk.startTime), "hh:mm a")}{brk.endTime && ` - ${format(new Date(brk.endTime), "hh:mm a")}`}{brk.durationMinutes && ` (${brk.durationMinutes}m)`}</p></div></div>))}
-                    {hasSubmittedReport && (<div className="flex items-start gap-3"><div className="mt-0.5 p-1.5 rounded-full bg-purple-100 dark:bg-purple-900/30"><FileText className="w-3 h-3 text-purple-600 dark:text-purple-400" /></div><div className="flex-1"><p className="text-sm font-medium text-slate-700 dark:text-slate-300">Report Submitted</p><p className="text-xs text-slate-400">Today</p></div></div>)}
-                    {currentEnd && (<div className="flex items-start gap-3"><div className="mt-0.5 p-1.5 rounded-full bg-blue-100 dark:bg-blue-900/30"><LogOut className="w-3 h-3 text-blue-600 dark:text-blue-400" /></div><div className="flex-1"><p className="text-sm font-medium text-slate-700 dark:text-slate-300">Clocked Out</p><p className="text-xs text-slate-400">{format(new Date(currentEnd), "hh:mm a")}</p></div></div>)}
-                    {!currentStart && breaks.length === 0 && (<div className="text-center py-8"><Circle className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" /><p className="text-sm text-slate-400">No activity yet</p><p className="text-xs text-slate-400 mt-1">Start your shift to begin tracking</p></div>)}
+                    {currentStart && (
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 p-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+                          <LogIn className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Clocked In</p>
+                          <p className="text-xs text-slate-400">{format(new Date(currentStart), "hh:mm a")}</p>
+                        </div>
+                      </div>
+                    )}
+                    {breaks.map((brk, i) => (
+                      <div key={i} className="flex items-start gap-3">
+                        <div className="mt-0.5 p-1.5 rounded-full bg-orange-100 dark:bg-orange-900/30">
+                          <Coffee className="w-3 h-3 text-orange-600 dark:text-orange-400" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">{brk.type} Break</p>
+                          <p className="text-xs text-slate-400">
+                            {format(new Date(brk.startTime), "hh:mm a")}
+                            {brk.endTime && ` - ${format(new Date(brk.endTime), "hh:mm a")}`}
+                            {brk.durationMinutes && ` (${brk.durationMinutes}m)`}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {hasSubmittedReport && (
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 p-1.5 rounded-full bg-purple-100 dark:bg-purple-900/30">
+                          <FileText className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Report Submitted</p>
+                          <p className="text-xs text-slate-400">Today</p>
+                        </div>
+                      </div>
+                    )}
+                    {currentEnd && (
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 p-1.5 rounded-full bg-blue-100 dark:bg-blue-900/30">
+                          <LogOut className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Clocked Out</p>
+                          <p className="text-xs text-slate-400">{format(new Date(currentEnd), "hh:mm a")}</p>
+                        </div>
+                      </div>
+                    )}
+                    {!currentStart && breaks.length === 0 && (
+                      <div className="text-center py-8">
+                        <Circle className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                        <p className="text-sm text-slate-400">No activity yet</p>
+                        <p className="text-xs text-slate-400 mt-1">Start your shift to begin tracking</p>
+                      </div>
+                    )}
                   </div>
                 </ScrollArea>
               </CardContent>
@@ -1957,7 +2435,12 @@ export default function EmployeeDashboard() {
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Work Details <span className="text-red-500">*</span></Label>
-                <Textarea placeholder="What did you work on today? Describe your tasks, progress, and achievements..." className="min-h-[120px] resize-none" value={reportContent} onChange={(e) => setReportContent(e.target.value)} />
+                <Textarea
+                  placeholder="What did you work on today? Describe your tasks, progress, and achievements..."
+                  className="min-h-[120px] resize-none"
+                  value={reportContent}
+                  onChange={(e) => setReportContent(e.target.value)}
+                />
               </div>
 
               <div className="space-y-2">
@@ -1985,12 +2468,21 @@ export default function EmployeeDashboard() {
 
               <div className="space-y-2">
                 <Label className="text-sm font-medium">References <span className="text-red-500">*</span></Label>
-                <Input placeholder="Links to PRs, docs, designs, etc." value={references} onChange={(e) => setReferences(e.target.value)} />
+                <Input
+                  placeholder="Links to PRs, docs, designs, etc."
+                  value={references}
+                  onChange={(e) => setReferences(e.target.value)}
+                />
               </div>
 
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Additional Notes <span className="text-red-500">*</span></Label>
-                <Textarea placeholder="Any blockers, questions, or notes for tomorrow..." className="min-h-[80px] resize-none" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <Textarea
+                  placeholder="Any blockers, questions, or notes for tomorrow..."
+                  className="min-h-[80px] resize-none"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
               </div>
             </div>
             <DialogFooter>
@@ -2000,7 +2492,13 @@ export default function EmployeeDashboard() {
                 disabled={isSubmittingReport || !isFormValid()}
                 className="gap-2"
               >
-                {isSubmittingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : (existingReportId ? <FileCheck className="w-4 h-4" /> : <Send className="w-4 h-4" />)}
+                {isSubmittingReport ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : existingReportId ? (
+                  <FileCheck className="w-4 h-4" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
                 {existingReportId ? "Update Report" : "Submit Report"}
               </Button>
             </DialogFooter>
@@ -2011,22 +2509,46 @@ export default function EmployeeDashboard() {
         <Dialog open={endShiftDialogOpen} onOpenChange={setEndShiftDialogOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><LogOut className="w-5 h-5 text-red-500" />End Shift</DialogTitle>
-              <DialogDescription>Are you sure you want to end your {activeTab} shift? This action cannot be undone.</DialogDescription>
+              <DialogTitle className="flex items-center gap-2">
+                <LogOut className="w-5 h-5 text-red-500" />End Shift
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to end your {activeTab} shift? This action cannot be undone.
+              </DialogDescription>
             </DialogHeader>
             <div className="py-4">
               <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-900 space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-slate-500">Clock In</span><span className="font-medium">{currentStart ? format(new Date(currentStart), "hh:mm a") : "--:--"}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-slate-500">Gross Time</span><span className="font-medium">{formatDurationShort(grossWorkedSeconds)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-slate-500">Break Time</span><span className="font-medium">{formatDurationShort(totalBreakSeconds)}</span></div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Clock In</span>
+                  <span className="font-medium">{currentStart ? format(new Date(currentStart), "hh:mm a") : "--:--"}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Gross Time</span>
+                  <span className="font-medium">{formatDurationShort(grossWorkedSeconds)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Break Time</span>
+                  <span className="font-medium">{formatDurationShort(totalBreakSeconds)}</span>
+                </div>
                 <Separator />
-                <div className="flex justify-between text-sm"><span className="text-slate-500 font-medium">Net Working Time</span><span className="font-bold text-emerald-600">{formatDurationShort(netWorkedSeconds)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-slate-500">Report Status</span><span className="font-medium text-emerald-600 flex items-center gap-1"><CheckCircle className="w-3 h-3" />Submitted</span></div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500 font-medium">Net Working Time</span>
+                  <span className="font-bold text-emerald-600">{formatDurationShort(netWorkedSeconds)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Report Status</span>
+                  <span className="font-medium text-emerald-600 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />Submitted
+                  </span>
+                </div>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setEndShiftDialogOpen(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={endShift} disabled={isEndingShift} className="gap-2">{isEndingShift ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}End Shift</Button>
+              <Button variant="destructive" onClick={endShift} disabled={isEndingShift} className="gap-2">
+                {isEndingShift ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                End Shift
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

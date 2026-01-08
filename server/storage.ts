@@ -300,65 +300,65 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
-async deleteUser(userId: string): Promise<void> {
-  // 1. Get all special request IDs belonging to this user
-  const userRequests = await db
-    .select({ id: specialRequests.id })
-    .from(specialRequests)
-    .where(eq(specialRequests.userId, userId));
-  
-  const requestIds = userRequests.map(r => r.id);
+  async deleteUser(userId: string): Promise<void> {
+    // 1. Get all special request IDs belonging to this user
+    const userRequests = await db
+      .select({ id: specialRequests.id })
+      .from(specialRequests)
+      .where(eq(specialRequests.userId, userId));
 
-  // 2. Delete comments associated with those requests
-  if (requestIds.length > 0) {
+    const requestIds = userRequests.map(r => r.id);
+
+    // 2. Delete comments associated with those requests
+    if (requestIds.length > 0) {
+      await db
+        .delete(requestComments)
+        .where(inArray(requestComments.requestId, requestIds));
+    }
+
+    // 3. Delete comments made BY this user on other requests
     await db
       .delete(requestComments)
-      .where(inArray(requestComments.requestId, requestIds));
+      .where(eq(requestComments.userId, userId));
+
+    // 4. Delete special requests themselves
+    await db
+      .delete(specialRequests)
+      .where(eq(specialRequests.userId, userId));
+
+    // 5. Delete reports associated with user's shifts
+    await db
+      .delete(dailyShiftReports)
+      .where(eq(dailyShiftReports.userId, userId));
+
+    // 6. Delete target items and targets
+    await db
+      .delete(targetItems)
+      .where(eq(targetItems.userId, userId));
+
+    await db
+      .delete(targets)
+      .where(eq(targets.userId, userId));
+
+    // 7. Delete breaks and shifts
+    await db
+      .delete(breaks)
+      .where(eq(breaks.userId, userId));
+
+    await db
+      .delete(shifts)
+      .where(eq(shifts.userId, userId));
+
+    // 8. Delete activity logs
+    await db
+      .delete(activityLogs)
+      .where(eq(activityLogs.userId, userId));
+
+    // 9. Finally, delete the user
+    await db
+      .delete(users)
+      .where(eq(users.id, userId));
   }
-
-  // 3. Delete comments made BY this user on other requests
-  await db
-    .delete(requestComments)
-    .where(eq(requestComments.userId, userId));
-
-  // 4. Delete special requests themselves
-  await db
-    .delete(specialRequests)
-    .where(eq(specialRequests.userId, userId));
-
-  // 5. Delete reports associated with user's shifts
-  await db
-    .delete(dailyShiftReports)
-    .where(eq(dailyShiftReports.userId, userId));
-
-  // 6. Delete target items and targets
-  await db
-    .delete(targetItems)
-    .where(eq(targetItems.userId, userId));
-  
-  await db
-    .delete(targets)
-    .where(eq(targets.userId, userId));
-
-  // 7. Delete breaks and shifts
-  await db
-    .delete(breaks)
-    .where(eq(breaks.userId, userId));
-    
-  await db
-    .delete(shifts)
-    .where(eq(shifts.userId, userId));
-
-  // 8. Delete activity logs
-  await db
-    .delete(activityLogs)
-    .where(eq(activityLogs.userId, userId));
-
-  // 9. Finally, delete the user
-  await db
-    .delete(users)
-    .where(eq(users.id, userId));
-}
 
   async getAllUsers(): Promise<SafeUser[]> {
     const allUsers = await db.select({
@@ -557,8 +557,19 @@ async deleteUser(userId: string): Promise<void> {
       .limit(limit);
   }
 
+  // server/storage.ts - Update the getTodayShifts method
+
   async getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]> {
-    const today = new Date().toISOString().split("T")[0];
+    // ✅ FIX: Use Pakistan timezone for correct date
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+
+    console.log(`[getTodayShifts] Fetching shifts for date: ${today} (Pakistan Time)`);
+
     const records = await db
       .select({
         id: shifts.id,
@@ -585,15 +596,12 @@ async deleteUser(userId: string): Promise<void> {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -606,11 +614,20 @@ async deleteUser(userId: string): Promise<void> {
       .leftJoin(users, eq(shifts.userId, users.id))
       .where(eq(shifts.date, today));
 
+    console.log(`[getTodayShifts] Found ${records.length} shifts for ${today}`);
+
+    // Log each shift for debugging
+    records.forEach(r => {
+      console.log(`  - Shift: userId=${r.userId}, morningIn=${!!r.morningClockIn}, eveningIn=${!!r.eveningClockIn}`);
+    });
+
     // Fetch breaks for all shifts
     const shiftIds = records.map(r => r.id);
     const allBreaks = shiftIds.length > 0
       ? await db.select().from(breaks).where(inArray(breaks.shiftId, shiftIds))
       : [];
+
+    console.log(`[getTodayShifts] Found ${allBreaks.length} breaks`);
 
     // Merge breaks into shifts
     const shiftsWithBreaks = records.map(shift => ({
@@ -620,7 +637,6 @@ async deleteUser(userId: string): Promise<void> {
 
     return shiftsWithBreaks as (Shift & { user: SafeUser; breaks: Break[] })[];
   }
-
   async getIncompleteShiftsBeforeDate(userId: string, beforeDate: string): Promise<Shift[]> {
     return await db
       .select()
