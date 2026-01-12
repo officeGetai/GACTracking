@@ -86,8 +86,9 @@ async function checkShiftOvertime() {
             let scheduledEnd: Date | null = null;
             let shiftTypeStr = "";
 
-            // Use shift.date as the anchor.
-            const baseDate = shift.date;
+            // Use scheduledDate if available (for cross-midnight shifts), otherwise use shift.date
+            // scheduledDate contains the intended working date, which is correct for early morning shifts
+            const baseDate = (shift as any).scheduledDate || shift.date;
 
             if (user.shiftType === "one_shift" && user.shiftEndTime && user.shiftStartTime) {
                 scheduledStart = parseTime(user.shiftStartTime, baseDate);
