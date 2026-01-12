@@ -239,9 +239,38 @@ function parseUserTime(dateStr: string, timeStr: string): Date {
 }
 
 /**
+ * Get the hour from a timestamp in Pakistan timezone (Asia/Karachi)
+ */
+function getHourInPakistan(date: Date): number {
+  return parseInt(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Karachi',
+    hour: '2-digit',
+    hour12: false
+  }).format(date), 10);
+}
+
+/**
+ * Get the date string (YYYY-MM-DD) in Pakistan timezone
+ */
+function getDateInPakistan(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+/**
  * Calculate the correct scheduled date for a shift based on clock-in time and scheduled start.
  * This handles cross-midnight scenarios where an employee clocks in before midnight
  * for a shift that starts after midnight.
+ * 
+ * Example: Employee clocks in at 23:45 for a 00:10 shift. The scheduled date should be
+ * the NEXT calendar day from when they clocked in.
+ * 
+ * IMPORTANT: Uses Pakistan timezone (Asia/Karachi) for all calculations since
+ * the server may run in UTC but users are in Pakistan (GMT+5).
  * 
  * @param clockInTime - The actual clock-in timestamp
  * @param scheduledStartTimeStr - The scheduled start time (HH:MM)
@@ -258,30 +287,24 @@ function calculateScheduledDate(
     return workingDate;
   }
   
-  const [startHours, startMinutes] = scheduledStartTimeStr.split(':').map(Number);
+  const [startHours] = scheduledStartTimeStr.split(':').map(Number);
   
-  // Build the scheduled start on the working date
-  const scheduledStartOnWorkingDate = new Date(workingDate + 'T00:00:00');
-  scheduledStartOnWorkingDate.setHours(startHours, startMinutes || 0, 0, 0);
+  // Get clock-in hour in Pakistan timezone (NOT UTC)
+  const clockInHourPKT = getHourInPakistan(clockInTime);
   
-  // Check if clock-in is significantly before the scheduled start (more than 2 hours)
-  // This would indicate the employee clocked in the day before for an early morning shift
-  const timeDiffMs = scheduledStartOnWorkingDate.getTime() - clockInTime.getTime();
-  const hoursBeforeStart = timeDiffMs / (1000 * 60 * 60);
-  
-  // If the scheduled start appears to be MORE than 2 hours after clock-in,
-  // AND the scheduled start is in early morning (before 6 AM),
-  // the scheduled date should be the NEXT day from the working date
-  if (hoursBeforeStart > 2 && startHours < 6) {
-    // The working date was recorded as the previous day; the actual shift is for the next day
-    const nextDay = new Date(workingDate + 'T00:00:00');
+  // Cross-midnight detection:
+  // If the scheduled start is early morning (before 6 AM)
+  // AND the clock-in is in late evening (8 PM or later) in Pakistan time
+  // Then the employee is clocking in the night BEFORE the actual shift date
+  // 
+  // Example: Clock-in at 23:45 PKT on Jan 11 for a 00:10 shift means the scheduled date is Jan 12
+  if (startHours < 6 && clockInHourPKT >= 20) {
+    // Get the clock-in date in Pakistan timezone and add one day
+    const clockInDatePKT = getDateInPakistan(clockInTime);
+    const nextDay = new Date(clockInDatePKT + 'T12:00:00'); // Use noon to avoid DST issues
     nextDay.setDate(nextDay.getDate() + 1);
     return nextDay.toISOString().split('T')[0];
   }
-  
-  // If clock-in is AFTER the scheduled start by more than 22 hours,
-  // it likely means the shift was for the previous day but that's a late clock-in scenario
-  // which we don't adjust for
   
   return workingDate;
 }

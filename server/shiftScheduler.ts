@@ -82,6 +82,17 @@ function calculateShiftEndDateTime(
         }
     }
     
+    // Final safeguard: if computed end time is STILL before clock-in by more than 12 hours,
+    // something is wrong - adjust the end time forward
+    // This handles incorrectly populated scheduledDate values
+    if (endDate.getTime() < clockInTime.getTime()) {
+        const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
+        if (gapHours > 12) {
+            console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is ${gapHours.toFixed(1)}h before clock-in ${clockInTime.toISOString()}, adjusting forward`);
+            endDate.setDate(endDate.getDate() + 1);
+        }
+    }
+    
     return endDate;
 }
 
