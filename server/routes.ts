@@ -36,7 +36,7 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
   const config = await storage.getWasenderConfig();
   return {
     apiToken: config?.apiToken || null,
-    groups: config?.groups || undefined,
+    groupId: config?.groupId || null,
     isActive: config?.isActive || false,
   };
 }
@@ -980,7 +980,7 @@ export async function registerRoutes(
   app.get("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
       const config = await storage.getWasenderConfig();
-      res.json(config || { instanceId: "", apiToken: "", groups: null, isActive: false });
+      res.json(config || { instanceId: "", apiToken: "", groupId: null, isActive: false });
     } catch (error) {
       console.error("Failed to fetch WASENDER config:", error);
       res.status(500).json({ error: "Failed to fetch WASENDER config" });
@@ -989,8 +989,8 @@ export async function registerRoutes(
 
   app.post("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
-      const { instanceId, apiToken, groups, isActive } = req.body;
-      const config = await storage.updateWasenderConfig({ instanceId, apiToken, groups, isActive });
+      const { instanceId, apiToken, groupId, isActive } = req.body;
+      const config = await storage.updateWasenderConfig({ instanceId, apiToken, groupId, isActive });
       res.json(config);
     } catch (error) {
       console.error("Failed to update WASENDER config:", error);
@@ -1010,7 +1010,7 @@ export async function registerRoutes(
         apiToken: config.apiToken,
         instanceId: config.instanceId,
         isActive: config.isActive,
-        groups: config.groups || undefined
+        groupId: config.groupId || null
       };
 
       const result = await sendTestMessage(settings);

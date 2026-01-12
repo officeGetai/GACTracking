@@ -11,7 +11,7 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
     const config = await storage.getWasenderConfig();
     return {
         apiToken: config?.apiToken || null,
-        groups: config?.groups || undefined,
+        groupId: config?.groupId || null,
         isActive: config?.isActive || false,
     };
 }

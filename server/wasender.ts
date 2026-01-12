@@ -11,20 +11,15 @@ const PAKISTAN_TIMEZONE_OFFSET = 5 * 60; // 5 hours in minutes
 export interface WasenderSettings {
   instanceId?: string | null;
   apiToken: string | null;
-  // Removed: groupId: string | null; // Replaced by specific groups
+  groupId: string | null;
   isActive: boolean | null;
-  groups?: { // Added groups object as per shared/schema.ts
-    requests?: string | null;       // For "GAC REQUESTS"
-    shiftReports?: string | null;   // For "GAC SHIFT REPORTS"
-    trackingAlerts?: string | null; // For "GAC TRACKING ALERTS"
-  };
 }
 
 interface Employee {
   fullName: string;
   department: string;
   phone?: string | null;
-  whatsappPreference?: string | null; // "both", "breaks_only", "shift_reports_only", "none"
+  whatsappPreference?: string | null;
 }
 
 // Helper to get WASENDER settings from storage
@@ -34,8 +29,7 @@ export async function getWasenderSettings(): Promise<WasenderSettings> {
   const config = await storage.getWasenderConfig();
   return {
     apiToken: config?.apiToken || null,
-    // groupId: config?.groupId || null, // GroupId removed
-    groups: config?.groups || undefined, // Use groups object
+    groupId: config?.groupId || null,
     isActive: config?.isActive || false,
   };
 }
@@ -145,29 +139,8 @@ async function sendNotification(
   const targets: string[] = [];
   const preference = employee.whatsappPreference || "both"; // Default to both if not set
 
-  // Determine the correct group ID based on notificationType
-  let groupToSendTo: string | null | undefined = null;
-  if (settings.groups) {
-    switch (notificationType) {
-      case "report":
-        // Only shift reports go to "GAC SHIFT REPORTS" group
-        groupToSendTo = settings.groups.shiftReports;
-        break;
-      case "shift":
-      case "break":
-      case "alert":
-        // Shift status, breaks, and alerts (late arrival, reminders, etc) go to "GAC TRACKING ALERTS" group
-        groupToSendTo = settings.groups.trackingAlerts;
-        break;
-      case "request":
-        // Special requests go to "GAC REQUESTS" group
-        groupToSendTo = settings.groups.requests;
-        break;
-      // "reminder" notifications are typically individual, so no group for them
-      default:
-        console.log(`Unknown notification type '${notificationType}', no specific group assigned.`);
-    }
-  }
+  // Use the single configured groupId for all group notifications
+  const groupToSendTo = settings.groupId;
 
   // 1. Determine if we should send to Group
   // Only send to group if a group ID is configured for this type and it's not a personal reminder.
@@ -424,11 +397,11 @@ export async function sendTestMessage(settings: WasenderSettings): Promise<{ suc
     return { success: false, message: "API Token is missing" };
   }
 
-  // Find a target to send to (prioritize groups)
-  let target = settings.groups?.requests || settings.groups?.shiftReports || settings.groups?.trackingAlerts;
+  // Find a target to send to
+  const target = settings.groupId;
 
   if (!target) {
-    return { success: false, message: "No WhatsApp groups configured to test with." };
+    return { success: false, message: "No WhatsApp group ID configured to test with." };
   }
 
   const message = `🔔 *GAC Trackings System Test*

@@ -140,21 +140,16 @@ export const activityLogs = pgTable("activity_logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// WASENDER API configuration (groupId removed, groups added)
+// WASENDER API configuration
 export const wasenderConfig = pgTable("wasender_config", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   instanceId: text("instance_id"),
-  apiToken: text("api_token"), // Encrypted/stored securely
+  apiToken: text("api_token"),
+  groupId: text("group_id"),
   isActive: boolean("is_active").default(false),
   lastTested: timestamp("last_tested"),
   updatedAt: timestamp("updated_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
-  // New groups column to store specific WhatsApp group IDs as JSON
-  groups: jsonb("groups").$type<{
-    requests?: string | null;
-    shiftReports?: string | null;
-    trackingAlerts?: string | null;
-  }>(),
 });
 
 // Daily Shift Reports table
@@ -408,7 +403,7 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 
 // Updated WasenderConfig types
 export type InsertWasenderConfig = z.infer<typeof insertWasenderConfigSchema>;
-export type WasenderConfig = typeof wasenderConfig.$inferSelect; // This now correctly includes 'groups' and not 'groupId'
+export type WasenderConfig = typeof wasenderConfig.$inferSelect;
 
 export type InsertDailyShiftReport = z.infer<typeof insertDailyShiftReportSchema>;
 export type DailyShiftReport = typeof dailyShiftReports.$inferSelect;
