@@ -233,9 +233,10 @@ function formatTime(date: Date): string {
  */
 function parseUserTime(dateStr: string, timeStr: string): Date {
   const [hours, minutes] = timeStr.split(':').map(Number);
-  const result = new Date(dateStr + 'T00:00:00');
-  result.setHours(hours, minutes || 0, 0, 0);
-  return result;
+  // Create date in Pakistan timezone (UTC+5) using ISO format
+  const paddedHours = String(hours).padStart(2, '0');
+  const paddedMinutes = String(minutes || 0).padStart(2, '0');
+  return new Date(`${dateStr}T${paddedHours}:${paddedMinutes}:00+05:00`);
 }
 
 /**

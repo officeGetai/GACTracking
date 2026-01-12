@@ -3,17 +3,13 @@ import { getWasenderSettings, notifyBreakExceeded, notifyShiftOvertime, notifyAu
 import { BREAK_LIMITS, type Shift } from "@shared/schema";
 import { differenceInMinutes, isAfter, addDays } from "date-fns";
 
-// Helper to parse "HH:MM" string to a Date object relative to a base date
+// Helper to parse "HH:MM" string to a Date object relative to a base date in Pakistan timezone
 function parseTime(timeStr: string, baseDateStr: string): Date {
     const [hours, minutes] = timeStr.split(':').map(Number);
-    const date = new Date(baseDateStr);
-    // Explicitly set hours to avoid timezone shifting issues if baseDateStr is just YYYY-MM-DD
-    // But new Date("YYYY-MM-DD") is UTC. shifting to local hours might be tricky.
-    // Better: parse YYYY-MM-DD parts.
-    const [y, m, d] = baseDateStr.split('-').map(Number);
-    const localDate = new Date(y, m - 1, d); // Local time
-    localDate.setHours(hours, minutes, 0, 0);
-    return localDate;
+    // Create date in Pakistan timezone (UTC+5) using ISO format
+    const paddedHours = String(hours).padStart(2, '0');
+    const paddedMinutes = String(minutes || 0).padStart(2, '0');
+    return new Date(`${baseDateStr}T${paddedHours}:${paddedMinutes}:00+05:00`);
 }
 
 export function startScheduler() {

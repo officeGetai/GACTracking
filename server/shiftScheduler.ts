@@ -22,13 +22,14 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
  * Parse user's configured time string (HH:MM) and convert to Date for a specific date
  * @param dateStr - Date string in YYYY-MM-DD format
  * @param timeStr - Time string in HH:MM or HH:MM:SS format
- * @returns Date object with the specified date and time
+ * @returns Date object with the specified date and time in Pakistan timezone (UTC+5)
  */
 function parseUserTime(dateStr: string, timeStr: string): Date {
     const [hours, minutes] = timeStr.split(':').map(Number);
-    const result = new Date(dateStr + 'T00:00:00');
-    result.setHours(hours, minutes || 0, 0, 0);
-    return result;
+    // Create date in Pakistan timezone (UTC+5) using ISO format
+    const paddedHours = String(hours).padStart(2, '0');
+    const paddedMinutes = String(minutes || 0).padStart(2, '0');
+    return new Date(`${dateStr}T${paddedHours}:${paddedMinutes}:00+05:00`);
 }
 
 /**
@@ -57,9 +58,10 @@ function calculateShiftEndDateTime(
     // Use scheduledDate if available, otherwise fall back to shiftDate
     const baseDate = scheduledDate || shiftDate;
     
-    // Start with the base date
-    let endDate = new Date(baseDate + 'T00:00:00');
-    endDate.setHours(endHours, endMinutes || 0, 0, 0);
+    // Create end date in Pakistan timezone (UTC+5)
+    const paddedEndHours = String(endHours).padStart(2, '0');
+    const paddedEndMinutes = String(endMinutes || 0).padStart(2, '0');
+    let endDate = new Date(`${baseDate}T${paddedEndHours}:${paddedEndMinutes}:00+05:00`);
     
     const startMinutesTotal = startHours * 60 + (startMinutes || 0);
     const endMinutesTotal = endHours * 60 + (endMinutes || 0);
@@ -67,7 +69,7 @@ function calculateShiftEndDateTime(
     // Case 1: Classic cross-midnight shift (e.g., 22:00 - 06:00)
     // Start is in evening (>= 12:00) and end is earlier than start (in morning)
     if (startTimeStr && endMinutesTotal < startMinutesTotal && startHours >= 12) {
-        endDate.setDate(endDate.getDate() + 1);
+        endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000); // Add one day
         return endDate;
     }
     
@@ -77,7 +79,7 @@ function calculateShiftEndDateTime(
         if (endDate.getTime() < clockInTime.getTime()) {
             const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
             if (gapHours > 12) {
-                endDate.setDate(endDate.getDate() + 1);
+                endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
             }
         }
     }
@@ -89,7 +91,7 @@ function calculateShiftEndDateTime(
         const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
         if (gapHours > 12) {
             console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is ${gapHours.toFixed(1)}h before clock-in ${clockInTime.toISOString()}, adjusting forward`);
-            endDate.setDate(endDate.getDate() + 1);
+            endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
         }
     }
     
