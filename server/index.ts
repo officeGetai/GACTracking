@@ -99,8 +99,11 @@ async function ensureAdminExists() {
   }
 }
 
+import { startScheduler } from "./scheduler";
+
 (async () => {
   await ensureAdminExists();
+  startScheduler(); // Start the background scheduler
   await registerRoutes(httpServer, app);
 
   // Start the background shift scheduler

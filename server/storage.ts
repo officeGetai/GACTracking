@@ -142,6 +142,10 @@ export interface IStorage {
     totalDuration: number;
     byType: { type: string; count: number; duration: number }[];
   }>;
+  getAllMonitorableBreaks(): Promise<(Break & { user: SafeUser })[]>; // New method for scheduler
+  getShiftsForOvertimeCheck(): Promise<(Shift & { user: SafeUser })[]>;
+  forceCloseActiveShiftsAndBreaks(): Promise<void>;
+
 
   // Target methods (Existing - likely for individual performance)
   getTargetById(id: string): Promise<Target | undefined>;
@@ -783,6 +787,30 @@ export class DatabaseStorage implements IStorage {
 
   async getBreaksByShift(shiftId: string): Promise<Break[]> {
     return await db.select().from(breaks).where(eq(breaks.shiftId, shiftId));
+  }
+
+  async getAllMonitorableBreaks(): Promise<(Break & { user: SafeUser })[]> {
+    const activeBreaks = await db
+      .select()
+      .from(breaks)
+      .where(isNull(breaks.endTime));
+
+    // Fetch users for these breaks to get phone numbers
+    const breaksWithUsers = await Promise.all(activeBreaks.map(async (b) => {
+      const user = await this.getUser(b.userId);
+      return { ...b, user: user as SafeUser };
+    }));
+
+    return breaksWithUsers;
+  }
+
+  async updateBreak(id: string, data: Partial<Break>): Promise<Break> {
+    const [updated] = await db
+      .update(breaks)
+      .set(data)
+      .where(eq(breaks.id, id))
+      .returning();
+    return updated;
   }
 
   async getBreaksByUserAndDate(userId: string, date: string): Promise<Break[]> {
@@ -2060,6 +2088,105 @@ export class DatabaseStorage implements IStorage {
         eq(specialRequests.archived, true)
       ))
       .orderBy(desc(specialRequests.createdAt));
+  }
+
+  async getShiftsForOvertimeCheck(): Promise<(Shift & { user: SafeUser })[]> {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Get all shifts that are NOT closed (endTime is null) for today or previous days (technically overtime could span days)
+    // We filter by status 'present' or 'late' (meaning active) and check checking clockOut columns.
+
+    const activeShifts = await db
+      .select({
+        id: shifts.id,
+        userId: shifts.userId,
+        date: shifts.date,
+        morningClockIn: shifts.morningClockIn,
+        morningClockOut: shifts.morningClockOut,
+        morningLateMinutes: shifts.morningLateMinutes,
+        eveningClockIn: shifts.eveningClockIn,
+        eveningClockOut: shifts.eveningClockOut,
+        eveningLateMinutes: shifts.eveningLateMinutes,
+        status: shifts.status,
+        notes: shifts.notes,
+        overtimeNotificationSent: shifts.overtimeNotificationSent,
+        createdAt: shifts.createdAt,
+        user: getSafeUserSelectFields()
+      })
+      .from(shifts)
+      .innerJoin(users, eq(shifts.userId, users.id))
+      .where(
+        and(
+          // Shifts that are active (clocked in but not out)
+          // We check if either morning or evening is active
+          or(
+            and(isNotNull(shifts.morningClockIn), isNull(shifts.morningClockOut)),
+            and(isNotNull(shifts.eveningClockIn), isNull(shifts.eveningClockOut))
+          )
+        )
+      );
+
+    return activeShifts;
+  }
+
+  async forceCloseActiveShiftsAndBreaks(): Promise<void> {
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    // 1. Force Close active shifts from YESTERDAY (or before)
+    // We don't want to close TODAY's shifts if they just started at 8:55 AM.
+    // So we limit to shifts where date < today OR (date = today but maybe logic is tricky).
+    // The requirement says "9am system should clear all of the previous data".
+    // Implies clearing anything from "yesterday".
+
+    // Update shifts where date < today
+    // Actually, `shifts.date` is a string YYYY-MM-DD.
+    // If we run at 9AM today (2025-01-13), we want to close anything from 2025-01-12 or older.
+
+    const todayStr = now.toISOString().split('T')[0];
+
+    // Close Morning Shifts
+    await db.update(shifts)
+      .set({ morningClockOut: now })
+      .where(
+        and(
+          lt(shifts.date, todayStr),
+          isNotNull(shifts.morningClockIn),
+          isNull(shifts.morningClockOut)
+        )
+      );
+
+    // Close Evening Shifts
+    await db.update(shifts)
+      .set({ eveningClockOut: now })
+      .where(
+        and(
+          lt(shifts.date, todayStr),
+          isNotNull(shifts.eveningClockIn),
+          isNull(shifts.eveningClockOut)
+        )
+      );
+
+    // 2. Force End all active breaks
+    // We can just end ALL active breaks regardless of date, or restricts to older ones?
+    // User said "started breaks". Likely implies any dangling breaks.
+    // Safest is to end ALL active breaks found.
+
+    const activeBreaks = await db.select().from(breaks).where(isNull(breaks.endTime));
+
+    for (const b of activeBreaks) {
+      // Calculate duration if possible, else 0
+      const duration = Math.floor((now.getTime() - new Date(b.startTime).getTime()) / 60000);
+
+      await db.update(breaks)
+        .set({
+          endTime: now,
+          durationMinutes: duration
+        })
+        .where(eq(breaks.id, b.id));
+    }
   }
 }
 

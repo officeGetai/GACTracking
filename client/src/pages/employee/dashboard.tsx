@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { format, differenceInSeconds } from "date-fns";
+import { format, differenceInSeconds, subHours, addDays, subDays } from "date-fns";
 import {
   Clock,
   Coffee,
@@ -382,65 +382,105 @@ export default function EmployeeDashboard() {
       return d;
     };
 
-    const morningStart = parseTime(user?.morningShiftStart);
-    const morningEnd = parseTime(user?.morningShiftEnd);
-    const eveningStart = parseTime(user?.eveningShiftStart);
-    const eveningEnd = parseTime(user?.eveningShiftEnd);
+    // Helper to calculate effective shift times (handling overnight)
+    const getEffectiveShiftTimes = (startStr: string | undefined, endStr: string | undefined) => {
+      if (!startStr || !endStr) return null;
 
-    let isMorningUnlocked = false;
-    let isEveningUnlocked = false;
-    let isMorningLocked = false;
-    let isEveningLocked = false;
-    let morningMessage = "";
-    let eveningMessage = "";
-    let morningLockReason: "not_started" | "ended" | null = null;
-    let eveningLockReason: "not_started" | "ended" | null = null;
+      // 1. Parse base times for TODAY
+      const startToday = parseTime(startStr);
+      let endToday = parseTime(endStr);
+      if (!startToday || !endToday) return null;
 
-    // Helper to subtract hours
-    const subHours = (date: Date, hours: number) => {
-      const d = new Date(date);
-      d.setHours(d.getHours() - hours);
-      return d;
+      // Handle overnight (if end < start, it means end is next day)
+      if (endToday < startToday) {
+        endToday = addDays(endToday, 1);
+      }
+
+      const unlockToday = subHours(startToday, 2);
+
+      // 2. Parse times for YESTERDAY (to check if we are in previous day's shift)
+      const startYest = subDays(startToday, 1);
+      const endYest = subDays(endToday, 1);
+      const unlockYest = subDays(unlockToday, 1);
+
+      // Check if we are in Yesterday's window
+      if (now >= unlockYest && now < endYest) {
+        return { start: startYest, end: endYest, unlock: unlockYest, isYesterday: true };
+      }
+
+      // Check if we are in Today's window
+      if (now >= unlockToday && now < endToday) {
+        return { start: startToday, end: endToday, unlock: unlockToday, isYesterday: false };
+      }
+
+      // Default to showing Today's shift (even if locked or ended)
+      return { start: startToday, end: endToday, unlock: unlockToday, isYesterday: false };
     };
 
-    // Morning shift logic
-    const morningUnlockTime = morningStart ? subHours(morningStart, 2) : null;
+    const morningTimes = getEffectiveShiftTimes(user?.morningShiftStart, user?.morningShiftEnd);
+    const eveningTimes = getEffectiveShiftTimes(user?.eveningShiftStart, user?.eveningShiftEnd);
 
-    if (morningStart && morningUnlockTime && now < morningUnlockTime) {
-      isMorningLocked = true;
-      morningLockReason = "not_started";
-      morningMessage = `Unlocks at ${format(morningUnlockTime, "hh:mm a")} (2h before start)`;
-    } else if (morningStart && morningEnd && morningUnlockTime && now >= morningUnlockTime && now < morningEnd) {
-      isMorningUnlocked = true;
-    } else if (morningEnd && now >= morningEnd) {
-      if (shift?.morningClockIn && !shift?.morningClockOut) {
-        isMorningUnlocked = true;
-        morningMessage = "Overtime - please end your shift";
-      } else {
+    // Morning shift logic
+    let isMorningUnlocked = false;
+    let isMorningLocked = false;
+    let morningMessage = "";
+    let morningLockReason: "not_started" | "ended" | null = null;
+
+    if (morningTimes) {
+      if (now < morningTimes.unlock) {
         isMorningLocked = true;
-        morningLockReason = "ended";
-        morningMessage = "Morning shift time ended";
+        morningLockReason = "not_started";
+        morningMessage = `Unlocks at ${format(morningTimes.unlock, "hh:mm a")} (2h before start)`;
+      } else if (now >= morningTimes.unlock && now < morningTimes.end) {
+        isMorningUnlocked = true;
+        if (now < morningTimes.start) {
+          morningMessage = "Early clock-in available";
+        }
+      } else { // now >= morningTimes.end
+        // Check if active
+        if (shift?.morningClockIn && !shift?.morningClockOut) {
+          isMorningUnlocked = true;
+          morningMessage = "Overtime - please end your shift";
+        } else {
+          isMorningLocked = true;
+          morningLockReason = "ended";
+          morningMessage = "Morning shift time ended";
+        }
       }
+    } else {
+      morningMessage = "Morning shift not configured";
+      isMorningLocked = true;
     }
 
     // Evening shift logic
-    const eveningUnlockTime = eveningStart ? subHours(eveningStart, 2) : null;
+    let isEveningUnlocked = false;
+    let isEveningLocked = false;
+    let eveningMessage = "";
+    let eveningLockReason: "not_started" | "ended" | null = null;
 
-    if (eveningStart && eveningUnlockTime && now < eveningUnlockTime) {
-      isEveningLocked = true;
-      eveningLockReason = "not_started";
-      eveningMessage = `Unlocks at ${format(eveningUnlockTime, "hh:mm a")} (2h before start)`;
-    } else if (eveningStart && eveningEnd && eveningUnlockTime && now >= eveningUnlockTime && now < eveningEnd) {
-      isEveningUnlocked = true;
-    } else if (eveningEnd && now >= eveningEnd) {
-      if (shift?.eveningClockIn && !shift?.eveningClockOut) {
-        isEveningUnlocked = true;
-        eveningMessage = "Overtime - please end your shift";
-      } else {
+    if (eveningTimes) {
+      if (now < eveningTimes.unlock) {
         isEveningLocked = true;
-        eveningLockReason = "ended";
-        eveningMessage = "Evening shift time ended";
+        eveningLockReason = "not_started";
+        eveningMessage = `Unlocks at ${format(eveningTimes.unlock, "hh:mm a")} (2h before start)`;
+      } else if (now >= eveningTimes.unlock && now < eveningTimes.end) {
+        isEveningUnlocked = true;
+        if (now < eveningTimes.start) {
+          eveningMessage = "Early clock-in available";
+        }
+      } else { // now >= eveningTimes.end
+        if (shift?.eveningClockIn && !shift?.eveningClockOut) {
+          isEveningUnlocked = true;
+          eveningMessage = "Overtime - please end your shift";
+        } else {
+          isEveningLocked = true;
+          eveningLockReason = "ended";
+          eveningMessage = "Evening shift time ended";
+        }
       }
+    } else {
+      eveningMessage = "Evening shift not configured";
+      isEveningLocked = true;
     }
 
     return {
@@ -575,19 +615,50 @@ export default function EmployeeDashboard() {
   const currentShiftMessage = activeTab === "morning" ? morningMessage : eveningMessage;
   const currentLockReason = activeTab === "morning" ? morningLockReason : eveningLockReason;
 
+  // --- Dynamic Target Logic ---
+  const totalTargetSeconds = useMemo(() => {
+    if (isOpenShiftUser) {
+      return parseFloat(user?.openShiftRequiredHours || "8") * 3600;
+    }
+    if (user?.shiftType === "one_shift" && user?.shiftStartTime && user?.shiftEndTime) {
+      const start = new Date(`1970-01-01T${user.shiftStartTime}`);
+      const end = new Date(`1970-01-01T${user.shiftEndTime}`);
+      let diff = (end.getTime() - start.getTime()) / 1000;
+      if (diff < 0) diff += 24 * 3600;
+      return diff;
+    }
+    if (user?.shiftType === "two_shifts") {
+      let total = 0;
+      if (user.morningShiftStart && user.morningShiftEnd) {
+        const start = new Date(`1970-01-01T${user.morningShiftStart}`);
+        const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
+        let diff = (end.getTime() - start.getTime()) / 1000;
+        if (diff > 0) total += diff;
+      }
+      if (user.eveningShiftStart && user.eveningShiftEnd) {
+        const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
+        const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
+        let diff = (end.getTime() - start.getTime()) / 1000;
+        if (diff > 0) total += diff;
+      }
+      return total > 0 ? total : 8 * 3600;
+    }
+    return 8 * 3600;
+  }, [user]);
+
+  const targetHoursString = useMemo(() => {
+    return `${Math.round(totalTargetSeconds / 3600 * 10) / 10}h`;
+  }, [totalTargetSeconds]);
+
   const calculateProgress = () => {
     if (!currentStart) return 0;
-    const targetHours = isOpenShiftUser ? parseFloat(user?.openShiftRequiredHours || "8") : 8;
-    const targetSeconds = targetHours * 60 * 60;
-    return Math.min(Math.round((netWorkedSeconds / targetSeconds) * 100), 100);
+    return Math.min(Math.round((netWorkedSeconds / totalTargetSeconds) * 100), 100);
   };
 
   const calculateEfficiency = () => {
     if (!isStarted) return 0;
     if (isEnded) {
-      const targetHours = isOpenShiftUser ? parseFloat(user?.openShiftRequiredHours || "8") : 8;
-      const targetSeconds = targetHours * 60 * 60;
-      return Math.min(Math.round((netWorkedSeconds / targetSeconds) * 100), 100);
+      return Math.min(Math.round((netWorkedSeconds / totalTargetSeconds) * 100), 100);
     }
     if (grossWorkedSeconds === 0) return 100;
     return Math.round((netWorkedSeconds / grossWorkedSeconds) * 100);
@@ -849,7 +920,7 @@ export default function EmployeeDashboard() {
             <AlertDescription className="text-amber-700 dark:text-amber-500">
               You must submit a daily report before ending your {activeTab} shift.
               <Button
-                variant="link"
+                variant="ghost"
                 onClick={() => setReportDialogOpen(true)}
                 className="ml-2 p-0 h-auto text-amber-700 underline"
               >
@@ -908,7 +979,7 @@ export default function EmployeeDashboard() {
                     <div className="space-y-2 max-w-md">
                       <div className="flex justify-between text-xs text-slate-400">
                         <span>Progress</span>
-                        <span>{calculateProgress()}% of {isOpenShiftUser ? (user?.openShiftRequiredHours || 8) : 8}h target</span>
+                        <span>{calculateProgress()}% of {targetHoursString} target</span>
                       </div>
                       <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
                         <div
@@ -1063,7 +1134,7 @@ export default function EmployeeDashboard() {
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Target</p>
-                    <p className="text-lg font-bold">{isOpenShiftUser ? (user?.openShiftRequiredHours || 8) : 8}h</p>
+                    <p className="text-lg font-bold">{targetHoursString}</p>
                   </div>
                 </div>
               </Card>

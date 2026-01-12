@@ -27,6 +27,19 @@ interface Employee {
   whatsappPreference?: string | null; // "both", "breaks_only", "shift_reports_only", "none"
 }
 
+// Helper to get WASENDER settings from storage
+import { storage } from "./storage";
+
+export async function getWasenderSettings(): Promise<WasenderSettings> {
+  const config = await storage.getWasenderConfig();
+  return {
+    apiToken: config?.apiToken || null,
+    // groupId: config?.groupId || null, // GroupId removed
+    groups: config?.groups || undefined, // Use groups object
+    isActive: config?.isActive || false,
+  };
+}
+
 // --- HELPER FUNCTIONS ---
 
 function getPakistanTime(): Date {
@@ -51,19 +64,52 @@ function getSessionType(date: Date): string {
 }
 
 /**
+ * Robust fetch with retry logic
+ */
+async function fetchWithRetry(url: string, options: RequestInit, retries = 5, timeout = 20000): Promise<Response> {
+  let lastError: any;
+
+  for (let i = 0; i < retries; i++) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(id);
+      return response;
+    } catch (error: any) {
+      clearTimeout(id);
+      lastError = error;
+      console.warn(`Attempt ${i + 1} failed for ${url}: ${error.message}. Retrying...`);
+
+      // Wait before retrying (exponential backoff: 1s, 2s, 4s)
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
  * Send WhatsApp message to a specific target (Group ID or Phone Number)
  */
 async function sendToTarget(target: string, text: string, token: string): Promise<boolean> {
   try {
-    const response = await fetch(WASENDER_API_URL, {
+    const response = await fetchWithRetry(WASENDER_API_URL, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",
+        "Connection": "close",
       },
       body: JSON.stringify({
-        to: target, // Changed from 'number' to 'to' per API error
-        text: text, // Changed from 'message' to 'text' per API error
+        to: target,
+        text: text,
       }),
     });
 
@@ -75,7 +121,7 @@ async function sendToTarget(target: string, text: string, token: string): Promis
     console.log(`WASENDER message sent successfully to ${target}.`);
     return true;
   } catch (error) {
-    console.error(`Failed to send WhatsApp notification to ${target}:`, error);
+    console.error(`Failed to send WhatsApp notification to ${target} after retries:`, error);
     return false;
   }
 }
@@ -273,6 +319,27 @@ export async function notifyBreakEnd(
   await sendNotification(message, employee, settings, "break");
 }
 
+export async function notifyBreakExceeded(
+  employee: Employee,
+  breakType: string,
+  exceededByMinutes: number,
+  settings: WasenderSettings
+): Promise<void> {
+  const now = getPakistanTime();
+
+  const message = `🚨 BREAK TIME EXCEEDED!
+
+👤 Employee: ${employee.fullName}
+🏢 Department: ${employee.department}
+📋 Break Type: ${breakType}
+⚠️ Exceeded By: ${exceededByMinutes} minutes
+
+👉 Please return to work immediately.`;
+
+  // Send as "alert"
+  await sendNotification(message, employee, settings, "alert");
+}
+
 export async function notifyDailyReportSubmitted(
   employee: Employee,
   workDetails: string,
@@ -378,4 +445,25 @@ timestamp: ${new Date().toISOString()}`;
   } else {
     return { success: false, message: "Failed to send message via WASENDER API" };
   }
+}
+
+// Notify Shift Overtime (2 hours late)
+export async function notifyShiftOvertime(
+  employee: { fullName: string; department: string; phone?: string | null; whatsappPreference?: string | null },
+  lateMinutes: number,
+  settings: WasenderSettings
+) {
+  const message = `🚨 *SHIFT OVERTIME ALERT* 🚨\n\nHello ${employee.fullName},\n\nYou have been clocked in for ${Math.floor(lateMinutes / 60)}h ${lateMinutes % 60}m beyond your scheduled shift end time.\n\nPlease clock out immediately. If you do not close your shift within 15 minutes, it will be *forcefully closed*.\n\n_System Auto-Alert_`;
+
+  await sendNotification(message, employee, settings, "alert");
+}
+
+// Notify Shift Auto-Closed (Force)
+export async function notifyAutoClosed(
+  employee: { fullName: string; department: string; phone?: string | null; whatsappPreference?: string | null },
+  settings: WasenderSettings
+) {
+  const message = `🛑 *SHIFT AUTO-CLOSED* 🛑\n\nHello ${employee.fullName},\n\nYour shift has been forcefully closed by the system due to extended inactivity (2h 15m overtime).\n\nPlease contact your manager if this was an error.\n\n_System Auto-Action_`;
+
+  await sendNotification(message, employee, settings, "alert");
 }

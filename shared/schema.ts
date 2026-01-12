@@ -81,6 +81,7 @@ export const shifts = pgTable("shifts", {
   // Status
   status: text("status").notNull().default("not_started"), // 'not_started', 'present', 'absent', 'late', 'half_day'
   notes: text("notes"),
+  overtimeNotificationSent: boolean("overtime_notification_sent").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -95,6 +96,7 @@ export const breaks = pgTable("breaks", {
   startTime: timestamp("start_time").notNull(),
   endTime: timestamp("end_time"),
   durationMinutes: integer("duration_minutes"),
+  lateNotificationSent: boolean("late_notification_sent").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -430,9 +432,9 @@ export type SafeUser = Omit<User, "password">;
 
 // Break limits configuration
 export const BREAK_LIMITS = {
-  prayer: { maxPerDay: 3, shiftPeriod: "any" as const },
-  meal: { maxPerDay: 1, shiftPeriod: "any" as const },
-  urgent: { maxPerShift: 2, shiftPeriod: "any" as const },
+  prayer: { maxPerDay: 3, shiftPeriod: "any" as const, maxDuration: 16 },
+  meal: { maxPerDay: 1, shiftPeriod: "any" as const, maxDuration: 31 },
+  urgent: { maxPerShift: 2, shiftPeriod: "any" as const, maxDuration: 10 },
 } as const;
 
 // Departments list
