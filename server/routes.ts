@@ -4,6 +4,7 @@ import { createServer, type Server } from "http";
 import session from "express-session";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
+import { differenceInMinutes, parse, subHours, format } from "date-fns";
 import {
   insertUserSchema,
   insertShiftSchema,
@@ -24,6 +25,8 @@ import {
   notifyDailyReportSubmitted,
   type WasenderSettings
 } from "./wasender";
+import connectPg from "connect-pg-simple";
+import { pool } from "./db";
 
 // Helper to get WASENDER settings from storage
 async function getWasenderSettings(): Promise<WasenderSettings> {
@@ -119,23 +122,6 @@ declare module "express-session" {
 // ============= LATE CALCULATION HELPER =============
 /**
  * Calculate late minutes with a grace period.
- * 
- * Rules:
- * - If employee clocks in within the grace period (default 15 minutes), they are NOT late
- * - If employee clocks in after the grace period, late minutes = total delay - grace period
- * 
- * Examples (with 15-minute grace period, shift starts at 9:00 AM):
- * - Clock in at 9:00 AM → 0 minutes late
- * - Clock in at 9:10 AM → 0 minutes late (within grace)
- * - Clock in at 9:15 AM → 0 minutes late (exactly at grace limit)
- * - Clock in at 9:16 AM → 1 minute late
- * - Clock in at 9:30 AM → 15 minutes late (30 - 15 = 15)
- * - Clock in at 10:00 AM → 45 minutes late (60 - 15 = 45)
- * 
- * @param clockInTime - The actual time the employee clocked in
- * @param scheduledStartTime - The scheduled shift start time in "HH:MM" or "HH:MM:SS" format
- * @param gracePeriodMinutes - Grace period in minutes (default: 15)
- * @returns Number of late minutes (0 if on time or within grace period)
  */
 function calculateLateMinutesWithGrace(
   clockInTime: Date,
@@ -239,9 +225,6 @@ function formatTime(date: Date): string {
 
 /**
  * Parse user's configured time string (HH:MM) and convert to Date for a specific date
- * @param dateStr - Date string in YYYY-MM-DD format
- * @param timeStr - Time string in HH:MM or HH:MM:SS format
- * @returns Date object with the specified date and time
  */
 function parseUserTime(dateStr: string, timeStr: string): Date {
   const [hours, minutes] = timeStr.split(':').map(Number);
@@ -277,7 +260,8 @@ function cleanEmployeeData(data: any): any {
   const optionalFields = [
     'email', 'department', 'position', 'phone',
     'address', 'emergencyContact', 'shiftStartTime', 'shiftEndTime',
-    'morningShiftStart', 'morningShiftEnd', 'eveningShiftStart', 'eveningShiftEnd'
+    'morningShiftStart', 'morningShiftEnd', 'eveningShiftStart', 'eveningShiftEnd',
+    'openShiftRequiredHours' // NEW: Added this field
   ];
 
   for (const field of optionalFields) {
@@ -330,24 +314,25 @@ function cleanEmployeeData(data: any): any {
     cleaned.morningShiftEnd = null;
     cleaned.eveningShiftStart = null;
     cleaned.eveningShiftEnd = null;
+    // We KEEP openShiftRequiredHours here
   } else if (cleaned.shiftType === 'one_shift') {
     // Single shift - only use shiftStartTime and shiftEndTime
     cleaned.morningShiftStart = null;
     cleaned.morningShiftEnd = null;
     cleaned.eveningShiftStart = null;
     cleaned.eveningShiftEnd = null;
+    cleaned.openShiftRequiredHours = null;
     // Keep shiftStartTime and shiftEndTime as they are
   } else if (cleaned.shiftType === 'two_shifts') {
     // Two shifts - only use morning and evening times
     cleaned.shiftStartTime = null;
     cleaned.shiftEndTime = null;
+    cleaned.openShiftRequiredHours = null;
     // Keep morningShiftStart, morningShiftEnd, eveningShiftStart, eveningShiftEnd as they are
   }
 
   return cleaned;
 }
-
-// ============= ENHANCED DAY MANAGEMENT HELPERS =============
 
 // ============= ENHANCED DAY MANAGEMENT HELPERS =============
 
@@ -391,9 +376,6 @@ function isFromDate(timestamp: Date | string | null, dateStr: string): boolean {
 function isToday(timestamp: Date | string | null): boolean {
   return isFromDate(timestamp, getTodayDate());
 }
-
-// NOTE: getCurrentShiftPeriod removed - shift period is now determined by which shift is active
-// rather than using hard-coded time cutoffs
 
 // Calculate the effective working date considering the 3-hour buffer after last shift
 async function getEffectiveWorkingDate(userId: string): Promise<{
@@ -536,24 +518,22 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
 
         // Use user-specific configuration
         if (user?.shiftType === 'one_shift' && user.shiftEndTime) {
-          // One shift: Use user's configured end time
+          // One shift: Use user's configured end time + 1 hour buffer (Auto-Close logic)
           autoCloseTime = parseUserTime(shift.date, user.shiftEndTime);
-          console.log(`[Stale Cleanup] One-shift user - using configured end time: ${user.shiftEndTime}`);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
         } else if (user?.shiftType === 'two_shifts' && user.morningShiftEnd) {
-          // Two shifts: Use morning shift end time
+          // Two shifts: Use morning shift end time + 1 hour buffer
           autoCloseTime = parseUserTime(shift.date, user.morningShiftEnd);
-          console.log(`[Stale Cleanup] Two-shifts user - using morning end time: ${user.morningShiftEnd}`);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
         } else {
           // Fallback: 12 hours after clock-in for open/unconfigured shifts
           autoCloseTime = new Date(shift.morningClockIn);
           autoCloseTime.setHours(autoCloseTime.getHours() + SHIFT_CONFIG.DEFAULT_STALE_SHIFT_MAX_HOURS);
-          console.log(`[Stale Cleanup] No config found - using 12-hour fallback`);
         }
 
         // CRITICAL: Ensure auto-close time is not before clock-in time (prevent negative duration)
         const clockInTime = new Date(shift.morningClockIn);
         if (autoCloseTime <= clockInTime) {
-          console.warn(`[Stale Cleanup] Auto-close time ${autoCloseTime.toISOString()} is before clock-in ${clockInTime.toISOString()}. Adjusting...`);
           // Set to either end of the same day or clock-in + 8 hours
           autoCloseTime = new Date(clockInTime.getTime() + (8 * 60 * 60 * 1000));
         }
@@ -566,20 +546,18 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
 
         // Use user-specific configuration
         if (user?.shiftType === 'two_shifts' && user.eveningShiftEnd) {
-          // Two shifts: Use evening shift end time
+          // Two shifts: Use evening shift end time + 1 hour buffer
           autoCloseTime = parseUserTime(shift.date, user.eveningShiftEnd);
-          console.log(`[Stale Cleanup] Two-shifts user - using evening end time: ${user.eveningShiftEnd}`);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
         } else {
           // Fallback: 12 hours after clock-in for open/unconfigured shifts
           autoCloseTime = new Date(shift.eveningClockIn);
           autoCloseTime.setHours(autoCloseTime.getHours() + SHIFT_CONFIG.DEFAULT_STALE_SHIFT_MAX_HOURS);
-          console.log(`[Stale Cleanup] No config found - using 12-hour fallback`);
         }
 
         // CRITICAL: Ensure auto-close time is not before clock-in time
         const clockInTime = new Date(shift.eveningClockIn);
         if (autoCloseTime <= clockInTime) {
-          console.warn(`[Stale Cleanup] Auto-close time ${autoCloseTime.toISOString()} is before clock-in ${clockInTime.toISOString()}. Adjusting...`);
           autoCloseTime = new Date(clockInTime.getTime() + (8 * 60 * 60 * 1000));
         }
 
@@ -603,9 +581,6 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
 
   return { staleBreaksEnded, staleShiftsMarked };
 }
-
-import connectPg from "connect-pg-simple";
-import { pool } from "./db";
 
 const PostgreSqlStore = connectPg(session);
 
@@ -708,6 +683,37 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     });
+  });
+
+  // ============= BD TEAM TARGETS (NEW) =============
+
+  // Set/Update BD Target (Admin)
+  app.post("/api/bd-targets", requireAdmin, async (req, res) => {
+    try {
+      // Expecting { userId, month: "YYYY-MM", targetType: "revenue", targetAmount: 5000 }
+      const { userId, month, targetType, targetAmount } = req.body;
+      const result = await storage.setBdTarget({ userId, month, targetType, targetAmount });
+      res.json(result);
+    } catch (e) {
+      console.error("Failed to set BD target:", e);
+      res.status(500).json({ error: "Failed to set BD target" });
+    }
+  });
+
+  // Get BD Targets (Admin/Employee)
+  app.get("/api/bd-targets", requireAuth, async (req, res) => {
+    try {
+      const month = req.query.month as string;
+      const userId = req.session.role === 'admin'
+        ? (req.query.userId as string)
+        : req.session.userId!;
+
+      const targets = await storage.getBdTargets(userId, month);
+      res.json(targets);
+    } catch (e) {
+      console.error("Failed to fetch BD targets:", e);
+      res.status(500).json({ error: "Failed to fetch BD targets" });
+    }
   });
 
   // ============= ADMIN SHIFT ROUTES =============
@@ -845,6 +851,8 @@ export async function registerRoutes(
         morningShiftEnd: cleanedData.morningShiftEnd,
         eveningShiftStart: cleanedData.eveningShiftStart,
         eveningShiftEnd: cleanedData.eveningShiftEnd,
+        // Open Shift new field
+        openShiftRequiredHours: cleanedData.openShiftRequiredHours,
         // Other fields
         phone: cleanedData.phone,
         whatsappPreference: cleanedData.whatsappPreference,
@@ -1107,6 +1115,7 @@ export async function registerRoutes(
           morningShiftEnd: (user as any)?.morningShiftEnd,
           eveningShiftStart: (user as any)?.eveningShiftStart,
           eveningShiftEnd: (user as any)?.eveningShiftEnd,
+          openShiftRequiredHours: (user as any)?.openShiftRequiredHours, // Sent to frontend for UI display
           gracePeriodMinutes: GRACE_PERIOD_MINUTES,
           resetBufferHours: SHIFT_CONFIG.DAY_RESET_BUFFER_HOURS,
         }
@@ -1137,7 +1146,7 @@ export async function registerRoutes(
     }
   });
 
-  // ============= MORNING SHIFT START - WITH 15-MINUTE GRACE PERIOD =============
+  // ============= MORNING SHIFT START - MODIFIED (2-Hour Restriction & Open Shift Logic) =============
   app.post("/api/employee/shift/morning/start", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -1168,6 +1177,29 @@ export async function registerRoutes(
 
       // Get user to check their configured shift start time
       const user = await storage.getUser(userId);
+
+      // =========================================================
+      // REQUIREMENT: 2-Hour Start Restriction
+      // =========================================================
+      const isOpenShift = user?.shiftType === 'open';
+
+      if (!isOpenShift) {
+        const scheduledStartStr = getScheduledStartTime(user, 'morning');
+        if (scheduledStartStr) {
+          // Parse scheduled start time (assuming stored as "09:00:00")
+          const todayString = now.toISOString().split('T')[0];
+          const scheduledStart = new Date(`${todayString}T${scheduledStartStr}`);
+
+          // Calculate 2 hours before start
+          const earliestStart = subHours(scheduledStart, 2);
+
+          if (now < earliestStart) {
+            return res.status(400).json({
+              error: `You cannot start the shift yet. Clock-in is allowed from ${format(earliestStart, 'hh:mm a')}`
+            });
+          }
+        }
+      }
 
       // Determine the scheduled start time based on shift type
       const scheduledStartTime = getScheduledStartTime(user, 'morning');
@@ -1208,6 +1240,9 @@ export async function registerRoutes(
         logDetails = `Late by ${lateMinutes} minutes (after ${GRACE_PERIOD_MINUTES}min grace period)`;
       } else if (scheduledStartTime) {
         logDetails = `On time (within ${GRACE_PERIOD_MINUTES}min grace period)`;
+      } else if (isOpenShift) {
+        const reqHours = user?.openShiftRequiredHours || "N/A";
+        logDetails = `Open Shift Started. Target: ${reqHours} hours`;
       }
 
       await storage.createActivityLog({
@@ -1235,6 +1270,8 @@ export async function registerRoutes(
         message += ` (${lateMinutes}m late after ${GRACE_PERIOD_MINUTES}m grace period)`;
       } else if (scheduledStartTime) {
         message += ` (on time)`;
+      } else if (isOpenShift) {
+        message += ` (Open Shift - Start)`;
       }
 
       res.json({
@@ -1355,7 +1392,7 @@ export async function registerRoutes(
     }
   });
 
-  // ============= EVENING SHIFT START - WITH 15-MINUTE GRACE PERIOD =============
+  // ============= EVENING SHIFT START - MODIFIED (2-Hour Restriction) =============
   app.post("/api/employee/shift/evening/start", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -1387,11 +1424,30 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
 
       // ✅ BLOCK ONE_SHIFT USERS from using evening endpoint
-      // They must use the morning endpoint for their single shift (uses morningClockIn/Out columns)
       if (user?.shiftType === 'one_shift') {
         return res.status(400).json({
           error: "Your shift type is 'one_shift'. Please use the morning shift endpoint for your entire work day."
         });
+      }
+
+      // =========================================================
+      // REQUIREMENT: 2-Hour Start Restriction
+      // =========================================================
+      const isOpenShift = user?.shiftType === 'open';
+
+      if (!isOpenShift) {
+        const scheduledStartStr = getScheduledStartTime(user, 'evening');
+        if (scheduledStartStr) {
+          const todayString = now.toISOString().split('T')[0];
+          const scheduledStart = new Date(`${todayString}T${scheduledStartStr}`);
+          const earliestStart = subHours(scheduledStart, 2);
+
+          if (now < earliestStart) {
+            return res.status(400).json({
+              error: `You cannot start the shift yet. Clock-in is allowed from ${format(earliestStart, 'hh:mm a')}`
+            });
+          }
+        }
       }
 
       // Determine the scheduled start time based on shift type
@@ -1609,8 +1665,6 @@ export async function registerRoutes(
       if (activeBreak) {
         return res.status(400).json({ error: "Already on a break. Please end your current break first" });
       }
-
-      // The previous line `const currentPeriod = isMorningActive ? "morning" : "evening";` was redundant and removed.
 
       // Check break limits for working date
       const todayBreaks = await storage.getBreaksByUserAndDate(userId, workingDate);
@@ -2203,9 +2257,11 @@ export async function registerRoutes(
     }
   });
 
-  // ============= DAILY SHIFT REPORT ROUTES =============
+  // ============================================
+  // DAILY REPORTS ENDPOINTS
+  // ============================================
 
-  // Submit daily report (employee)
+  // Submit daily report (employee) - POST
   app.post("/api/reports/daily", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -2216,24 +2272,11 @@ export async function registerRoutes(
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Validate required fields for EVERYONE
-      if (!req.body.workDetails || req.body.workDetails.trim() === '') {
+      // ============================================
+      // VALIDATION - ONLY WORK DETAILS IS REQUIRED
+      // ============================================
+      if (!req.body.workDetails || String(req.body.workDetails).trim() === '') {
         return res.status(400).json({ error: "Work details are required" });
-      }
-      if (!req.body.notes || req.body.notes.trim() === '') {
-        return res.status(400).json({ error: "Notes are required (please describe challenges or progress)" });
-      }
-      if (!req.body.references || req.body.references.trim() === '') {
-        return res.status(400).json({ error: "References/Links are required" });
-      }
-
-      // MANDATORY Loom video for Development department
-      const isDevelopment = user.department === 'Development';
-      const loomVideos = req.body.loomVideos;
-      const hasLoom = loomVideos && loomVideos.trim() !== '' && loomVideos.trim() !== '[]';
-
-      if (isDevelopment && !hasLoom) {
-        return res.status(400).json({ error: "Loom video is compulsory to end the shift for the Development team" });
       }
 
       // Get or validate shift
@@ -2252,14 +2295,28 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Report already submitted for this shift" });
       }
 
+      // ============================================
+      // SAFE HANDLING OF OPTIONAL FIELDS
+      // Handle null, undefined, and empty strings
+      // ============================================
+      const safeString = (value: any): string | null => {
+        if (value === null || value === undefined) return null;
+        const str = String(value).trim();
+        return str.length > 0 ? str : null;
+      };
+
+      const loomVideos = safeString(req.body.loomVideos);
+      const notes = safeString(req.body.notes);
+      const references = safeString(req.body.references);
+
       const reportData = {
         userId,
         shiftId,
         date: req.body.date || today,
-        workDetails: req.body.workDetails.trim(),
-        loomVideos: hasLoom ? loomVideos.trim() : null,
-        notes: req.body.notes.trim(),
-        references: req.body.references.trim(),
+        workDetails: String(req.body.workDetails).trim(),
+        loomVideos,    // Optional - can be null
+        notes,         // Optional - can be null
+        references,    // Optional - can be null
         month: req.body.month || new Date().toISOString().slice(0, 7),
       };
 
@@ -2298,43 +2355,51 @@ export async function registerRoutes(
     }
   });
 
+  // Update daily report (employee) - PATCH
   app.patch("/api/reports/daily/:id", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
       const { id } = req.params;
+
       const user = await storage.getUser(userId);
-      if (!user) return res.status(401).json({ error: "User not found" });
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
 
       const report = await storage.getDailyShiftReport(id);
-      if (!report) return res.status(404).json({ error: "Report not found" });
+      if (!report) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+
       if (report.userId !== userId) {
         return res.status(403).json({ error: "Not authorized to edit this report" });
       }
 
-      // Same validation as POST
-      if (!req.body.workDetails || req.body.workDetails.trim() === '') {
+      // ============================================
+      // VALIDATION - ONLY WORK DETAILS IS REQUIRED
+      // ============================================
+      if (!req.body.workDetails || String(req.body.workDetails).trim() === '') {
         return res.status(400).json({ error: "Work details are required" });
       }
-      if (!req.body.notes || req.body.notes.trim() === '') {
-        return res.status(400).json({ error: "Notes are required" });
-      }
-      if (!req.body.references || req.body.references.trim() === '') {
-        return res.status(400).json({ error: "References/Links are required" });
-      }
 
-      const isDevelopment = user.department === 'Development';
-      const loomVideos = req.body.loomVideos;
-      const hasLoom = loomVideos && loomVideos.trim() !== '' && loomVideos.trim() !== '[]';
+      // ============================================
+      // SAFE HANDLING OF OPTIONAL FIELDS
+      // ============================================
+      const safeString = (value: any): string | null => {
+        if (value === null || value === undefined) return null;
+        const str = String(value).trim();
+        return str.length > 0 ? str : null;
+      };
 
-      if (isDevelopment && !hasLoom) {
-        return res.status(400).json({ error: "Loom video is compulsory to stay accountable in the Development team" });
-      }
+      const loomVideos = safeString(req.body.loomVideos);
+      const notes = safeString(req.body.notes);
+      const references = safeString(req.body.references);
 
       const updatedReport = await storage.updateDailyShiftReport(id, {
-        workDetails: req.body.workDetails.trim(),
-        loomVideos: hasLoom ? loomVideos.trim() : null,
-        notes: req.body.notes.trim(),
-        references: req.body.references.trim(),
+        workDetails: String(req.body.workDetails).trim(),
+        loomVideos,    // Optional - can be null
+        notes,         // Optional - can be null
+        references,    // Optional - can be null
       });
 
       await storage.createActivityLog({
@@ -2351,11 +2416,12 @@ export async function registerRoutes(
     }
   });
 
-  // Get my daily reports
+  // Get my daily reports - GET
   app.get("/api/reports/daily/my", requireAuth, async (req, res) => {
     try {
+      const userId = req.session.userId!;
       const month = req.query.month as string | undefined;
-      const reports = await storage.getDailyShiftReportsByUser(req.session.userId!, month);
+      const reports = await storage.getDailyShiftReportsByUser(userId, month);
       res.json(reports);
     } catch (error) {
       console.error("Failed to fetch daily reports:", error);
@@ -2363,7 +2429,7 @@ export async function registerRoutes(
     }
   });
 
-  // Get report by shift ID
+  // Get report by shift ID - GET
   app.get("/api/reports/daily/shift/:shiftId", requireAuth, async (req, res) => {
     try {
       const report = await storage.getReportByShiftId(req.params.shiftId);
@@ -2374,7 +2440,7 @@ export async function registerRoutes(
     }
   });
 
-  // Get today's report status
+  // Get today's report status - GET
   app.get("/api/reports/daily/today", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -2390,6 +2456,30 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to fetch today's report:", error);
       res.status(500).json({ error: "Failed to fetch today's report" });
+    }
+  });
+
+  // Get single report by ID - GET
+  app.get("/api/reports/daily/:id", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const { id } = req.params;
+
+      const report = await storage.getDailyShiftReport(id);
+      if (!report) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+
+      // Check if user owns this report or is admin
+      const user = await storage.getUser(userId);
+      if (report.userId !== userId && user?.role !== 'admin') {
+        return res.status(403).json({ error: "Not authorized to view this report" });
+      }
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch report:", error);
+      res.status(500).json({ error: "Failed to fetch report" });
     }
   });
 
@@ -3014,4 +3104,3 @@ export async function registerRoutes(
 
   return httpServer;
 }
-// ⚠️ END OF FILE - DO NOT ADD ANYTHING AFTER THIS LINE

@@ -6,6 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcrypt";
+import { startShiftScheduler } from "./shiftScheduler";
 
 const app = express();
 const httpServer = createServer(app);
@@ -101,6 +102,9 @@ async function ensureAdminExists() {
 (async () => {
   await ensureAdminExists();
   await registerRoutes(httpServer, app);
+
+  // Start the background shift scheduler
+  startShiftScheduler();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

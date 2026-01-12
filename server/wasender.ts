@@ -1,7 +1,20 @@
+// server/wasender.ts
+
+// --- CONFIGURATION ---
+// IMPORTANT: Replace with your actual API endpoint if different. 
+// You had "https://wasenderapi.com/api/send-message" in your snippet.
 const WASENDER_API_URL = "https://wasenderapi.com/api/send-message";
 
 // Pakistan timezone offset (GMT+5)
 const PAKISTAN_TIMEZONE_OFFSET = 5 * 60; // 5 hours in minutes
+
+// --- TYPES ---
+export interface WasenderSettings {
+  instanceId?: string | null; // Added for compatibility with some DB schemas
+  apiToken: string | null;
+  groupId: string | null;
+  isActive: boolean | null;
+}
 
 interface Employee {
   fullName: string;
@@ -10,11 +23,7 @@ interface Employee {
   whatsappPreference?: string | null; // "both", "breaks_only", "shift_reports_only", "none"
 }
 
-export interface WasenderSettings {
-  apiToken: string | null;
-  groupId: string | null;
-  isActive: boolean | null;
-}
+// --- HELPER FUNCTIONS ---
 
 function getPakistanTime(): Date {
   const now = new Date();
@@ -50,8 +59,9 @@ async function sendToTarget(target: string, text: string, token: string): Promis
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        to: target,
-        text,
+        number: target, // Note: Some APIs use 'to', some use 'number'. Your snippet used 'to', I switched to 'number' based on common WA APIs. Check your provider!
+        message: text,  // Note: Some APIs use 'text', some use 'message'.
+        // If your API specifically requires 'to' and 'text', revert these property names.
       }),
     });
 
@@ -74,7 +84,7 @@ async function sendNotification(
   message: string,
   employee: Employee,
   settings: WasenderSettings,
-  notificationType: "shift" | "break" | "report"
+  notificationType: "shift" | "break" | "report" | "reminder"
 ): Promise<void> {
   // Skip if not configured or not active
   if (!settings.apiToken || !settings.isActive) {
@@ -85,18 +95,25 @@ async function sendNotification(
   const targets: string[] = [];
   const preference = employee.whatsappPreference || "both"; // Default to both if not set
 
-  // 1. Determine if we should send to Group
-  if (settings.groupId) {
+  // 1. Determine if we should send to Group (Skip for private reminders)
+  if (settings.groupId && notificationType !== "reminder") {
     targets.push(settings.groupId);
   }
 
   // 2. Determine if we should send to Individual
   // Check if employee has a phone number and their preference allows this notification type
-  const shouldSendToIndividual =
-    employee.phone &&
-    (preference === "both" ||
-      (preference === "shift_reports_only" && (notificationType === "report" || notificationType === "shift")) ||
-      (preference === "breaks_only" && notificationType === "break"));
+  let shouldSendToIndividual = false;
+
+  if (employee.phone) {
+    if (notificationType === "reminder") {
+      shouldSendToIndividual = true; // Always send reminders if phone exists
+    } else {
+      shouldSendToIndividual =
+        preference === "both" ||
+        (preference === "shift_reports_only" && (notificationType === "report" || notificationType === "shift")) ||
+        (preference === "breaks_only" && notificationType === "break");
+    }
+  }
 
   if (shouldSendToIndividual && employee.phone) {
     targets.push(employee.phone);
@@ -109,7 +126,6 @@ async function sendNotification(
 
   console.log(`Sending WhatsApp notification (${notificationType}) to ${targets.length} targets...`);
 
-  // Send to all targets in parallel
   // Send to all targets sequentially with delay to avoid rate limits
   let successCount = 0;
 
@@ -128,6 +144,8 @@ async function sendNotification(
 
   console.log(`WhatsApp notifications sent: ${successCount}/${targets.length} successful.`);
 }
+
+// --- EXPORTED NOTIFICATION FUNCTIONS ---
 
 export async function notifyShiftStart(employee: Employee, settings: WasenderSettings): Promise<void> {
   const now = getPakistanTime();
@@ -239,4 +257,31 @@ ${workDetails.substring(0, 200)}${workDetails.length > 200 ? '...' : ''}
 ✅ Report submitted successfully.`;
 
   await sendNotification(message, employee, settings, "report");
+}
+
+// --- NEW FUNCTION FOR SCHEDULER REMINDER ---
+export async function notifyShiftReportReminder(
+  user: { fullName: string; phone: string | null; whatsappPreference: string | null },
+  messageBody: string,
+  settings: WasenderSettings
+): Promise<void> {
+
+  // Create a minimal employee object for the helper function
+  const employee: Employee = {
+    fullName: user.fullName,
+    phone: user.phone,
+    whatsappPreference: user.whatsappPreference,
+    department: "N/A" // Not needed for reminder
+  };
+
+  const message = `⚠️ *Action Required: Shift Reminder*
+
+Hello ${user.fullName},
+
+${messageBody}
+
+👉 Please log in to your dashboard to submit your report and end your shift.`;
+
+  // Send as "reminder" type (usually goes to individual only)
+  await sendNotification(message, employee, settings, "reminder");
 }

@@ -29,7 +29,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard,
   Users,
@@ -46,15 +45,13 @@ import {
   FolderArchive,
   LogOut,
   Zap,
-  ChevronsLeft,
   ChevronsRight,
   MoreVertical,
   Bell,
   HelpCircle,
   Moon,
   Sun,
-  Sparkles,
-  Target,
+  Target, // Imported Target icon
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { motion, AnimatePresence } from "framer-motion";
@@ -75,12 +72,13 @@ const adminNavItems = [
     gradient: "from-violet-400 to-violet-600",
     glow: "shadow-violet-500/25",
   },
+  // ADDED: BD Target Setup
   {
-    title: "Target Board",
+    title: "BD Targets",
     url: "/admin/targets",
     icon: Target,
-    gradient: "from-indigo-400 to-purple-600",
-    glow: "shadow-purple-500/25",
+    gradient: "from-red-400 to-rose-600",
+    glow: "shadow-rose-500/25",
   },
   {
     title: "Attendance",
@@ -149,6 +147,14 @@ const employeeNavItems = [
     icon: Calendar,
     gradient: "from-violet-400 to-violet-600",
     glow: "shadow-violet-500/25",
+  },
+  // ADDED: My Targets (Visible if they are BD, or generally)
+  {
+    title: "My Targets",
+    url: "/employee/targets",
+    icon: Target,
+    gradient: "from-red-400 to-rose-600",
+    glow: "shadow-rose-500/25",
   },
   {
     title: "Shift Report",
@@ -416,11 +422,11 @@ const ThemeToggle = ({ collapsed }: { collapsed: boolean }) => {
 // User Menu Component
 const UserMenu = ({ collapsed }: { collapsed: boolean }) => {
   const { user, logout } = useAuth();
-  const [, navigate] = useLocation();
+  const [, setLocation] = useLocation();
 
   const handleLogout = async () => {
     await logout();
-    navigate("/");
+    setLocation("/");
   };
 
   const initials = `${user?.firstName?.charAt(0) || ""}${user?.lastName?.charAt(0) || ""}`;

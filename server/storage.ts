@@ -12,6 +12,7 @@ import {
   specialRequests,
   requestComments,
   monthlyArchive,
+  bdTargets, // Added this import
   type User,
   type InsertUser,
   type Shift,
@@ -37,6 +38,8 @@ import {
   type MonthlyArchive,
   type InsertMonthlyArchive,
   type SafeUser,
+  type BdTarget, // Added this import
+  type InsertBdTarget, // Added this import
   BREAK_LIMITS
 } from "@shared/schema";
 import { and, eq, isNull, isNotNull, lt, or, desc, gte, lte, sql, inArray } from "drizzle-orm";
@@ -66,11 +69,13 @@ function getSafeUserSelectFields() {
     // One shift times
     shiftStartTime: users.shiftStartTime,
     shiftEndTime: users.shiftEndTime,
-    // Two shift times - ADDED THESE NEW FIELDS
+    // Two shift times
     morningShiftStart: users.morningShiftStart,
     morningShiftEnd: users.morningShiftEnd,
     eveningShiftStart: users.eveningShiftStart,
     eveningShiftEnd: users.eveningShiftEnd,
+    // Open Shift New Field
+    openShiftRequiredHours: users.openShiftRequiredHours,
     // Other fields
     phone: users.phone,
     whatsappPreference: users.whatsappPreference,
@@ -103,6 +108,7 @@ export interface IStorage {
   updateShift(id: string, data: Partial<InsertShift>): Promise<Shift | undefined>;
   getShiftsByUser(userId: string, limit?: number): Promise<Shift[]>;
   getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]>;
+  getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]>;
 
   // Break methods
   getBreakById(id: string): Promise<Break | undefined>;
@@ -114,19 +120,23 @@ export interface IStorage {
   getActiveBreakForDate(userId: string, date: string): Promise<Break | undefined>;
   countBreaksByType(userId: string, date: string, type: string, shiftPeriod?: string): Promise<number>;
   getAllActiveBreaks(userId: string): Promise<Break[]>;
-  endStaleBraaks(userId: string, currentDate: string): Promise<number>;
+  endStaleBreaks(userId: string, currentDate: string): Promise<number>;
   getBreakStatsForPeriod(userId: string, startDate: string, endDate: string): Promise<{
     totalBreaks: number;
     totalDuration: number;
     byType: { type: string; count: number; duration: number }[];
   }>;
 
-  // Target methods
+  // Target methods (Existing - likely for individual performance)
   getTargetById(id: string): Promise<Target | undefined>;
   getTargetByUserAndMonth(userId: string, month: string): Promise<Target | undefined>;
   createTarget(target: InsertTarget): Promise<Target>;
   updateTarget(id: string, data: Partial<InsertTarget>): Promise<Target | undefined>;
   getAllTargetsForMonth(month: string): Promise<(Target & { user: SafeUser })[]>;
+
+  // NEW: BD Target Methods
+  getBdTargets(userId: string, month?: string): Promise<BdTarget[]>;
+  setBdTarget(data: { userId: string; month: string; targetType?: string; targetAmount: string | number }): Promise<BdTarget>;
 
   // Target item methods
   getTargetItemById(id: string): Promise<TargetItem | undefined>;
@@ -243,11 +253,13 @@ export class DatabaseStorage implements IStorage {
       // One shift times
       shiftStartTime: insertUser.shiftStartTime || null,
       shiftEndTime: insertUser.shiftEndTime || null,
-      // Two shift times - ENSURE THESE ARE INCLUDED
+      // Two shift times
       morningShiftStart: (insertUser as any).morningShiftStart || null,
       morningShiftEnd: (insertUser as any).morningShiftEnd || null,
       eveningShiftStart: (insertUser as any).eveningShiftStart || null,
       eveningShiftEnd: (insertUser as any).eveningShiftEnd || null,
+      // NEW FIELD
+      openShiftRequiredHours: (insertUser as any).openShiftRequiredHours || null,
       // Other fields
       phone: insertUser.phone || null,
       whatsappPreference: insertUser.whatsappPreference || 'both',
@@ -277,6 +289,7 @@ export class DatabaseStorage implements IStorage {
       'shiftStartTime', 'shiftEndTime',
       'morningShiftStart', 'morningShiftEnd',
       'eveningShiftStart', 'eveningShiftEnd',
+      'openShiftRequiredHours', // Added here
       'phone', 'whatsappPreference', 'address', 'emergencyContact', 'isActive'
     ];
 
@@ -340,6 +353,11 @@ export class DatabaseStorage implements IStorage {
       .delete(targets)
       .where(eq(targets.userId, userId));
 
+    // NEW: Delete BD targets
+    await db
+      .delete(bdTargets)
+      .where(eq(bdTargets.userId, userId));
+
     // 7. Delete breaks and shifts
     await db
       .delete(breaks)
@@ -373,15 +391,13 @@ export class DatabaseStorage implements IStorage {
       salary: users.salary,
       status: users.status,
       shiftType: users.shiftType,
-      // One shift times
       shiftStartTime: users.shiftStartTime,
       shiftEndTime: users.shiftEndTime,
-      // Two shift times - ADDED
       morningShiftStart: users.morningShiftStart,
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      // Other fields
+      openShiftRequiredHours: users.openShiftRequiredHours, // Added
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -405,15 +421,13 @@ export class DatabaseStorage implements IStorage {
       salary: users.salary,
       status: users.status,
       shiftType: users.shiftType,
-      // One shift times
       shiftStartTime: users.shiftStartTime,
       shiftEndTime: users.shiftEndTime,
-      // Two shift times - ADDED
       morningShiftStart: users.morningShiftStart,
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      // Other fields
+      openShiftRequiredHours: users.openShiftRequiredHours, // Added
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -437,15 +451,13 @@ export class DatabaseStorage implements IStorage {
       salary: users.salary,
       status: users.status,
       shiftType: users.shiftType,
-      // One shift times
       shiftStartTime: users.shiftStartTime,
       shiftEndTime: users.shiftEndTime,
-      // Two shift times - ADDED
       morningShiftStart: users.morningShiftStart,
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      // Other fields
+      openShiftRequiredHours: users.openShiftRequiredHours, // Added
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -454,6 +466,45 @@ export class DatabaseStorage implements IStorage {
       createdAt: users.createdAt,
     }).from(users).where(eq(users.department, department));
     return deptUsers as SafeUser[];
+  }
+
+  // ============= BD TARGET METHODS (NEW) =============
+
+  async getBdTargets(userId: string, month?: string): Promise<BdTarget[]> {
+    const conditions = [eq(bdTargets.userId, userId)];
+
+    if (month) {
+      conditions.push(eq(bdTargets.month, month));
+    }
+
+    return await db.select().from(bdTargets).where(and(...conditions)).orderBy(desc(bdTargets.month));
+  }
+
+  async setBdTarget(data: { userId: string; month: string; targetType?: string; targetAmount: string | number }): Promise<BdTarget> {
+    const existing = await db.select().from(bdTargets).where(and(
+      eq(bdTargets.userId, data.userId),
+      eq(bdTargets.month, data.month)
+    ));
+
+    if (existing.length > 0) {
+      // Update
+      const [updated] = await db.update(bdTargets).set({
+        targetAmount: String(data.targetAmount),
+        targetType: data.targetType || existing[0].targetType,
+        updatedAt: new Date()
+      }).where(eq(bdTargets.id, existing[0].id)).returning();
+      return updated;
+    } else {
+      // Create
+      const [created] = await db.insert(bdTargets).values({
+        userId: data.userId,
+        month: data.month,
+        targetType: data.targetType || 'revenue',
+        targetAmount: String(data.targetAmount),
+        achievedAmount: "0"
+      }).returning();
+      return created;
+    }
   }
 
   // ============= SHIFT METHODS =============
@@ -486,15 +537,13 @@ export class DatabaseStorage implements IStorage {
             salary: users.salary,
             status: users.status,
             shiftType: users.shiftType,
-            // One shift times
             shiftStartTime: users.shiftStartTime,
             shiftEndTime: users.shiftEndTime,
-            // Two shift times - ADDED
             morningShiftStart: users.morningShiftStart,
             morningShiftEnd: users.morningShiftEnd,
             eveningShiftStart: users.eveningShiftStart,
             eveningShiftEnd: users.eveningShiftEnd,
-            // Other fields
+            openShiftRequiredHours: users.openShiftRequiredHours, // Added
             phone: users.phone,
             whatsappPreference: users.whatsappPreference,
             address: users.address,
@@ -557,8 +606,6 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  // server/storage.ts - Update the getTodayShifts method
-
   async getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]> {
     // ✅ FIX: Use Pakistan timezone for correct date
     const today = new Intl.DateTimeFormat('en-CA', {
@@ -602,6 +649,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -616,18 +664,11 @@ export class DatabaseStorage implements IStorage {
 
     console.log(`[getTodayShifts] Found ${records.length} shifts for ${today}`);
 
-    // Log each shift for debugging
-    records.forEach(r => {
-      console.log(`  - Shift: userId=${r.userId}, morningIn=${!!r.morningClockIn}, eveningIn=${!!r.eveningClockIn}`);
-    });
-
     // Fetch breaks for all shifts
     const shiftIds = records.map(r => r.id);
     const allBreaks = shiftIds.length > 0
       ? await db.select().from(breaks).where(inArray(breaks.shiftId, shiftIds))
       : [];
-
-    console.log(`[getTodayShifts] Found ${allBreaks.length} breaks`);
 
     // Merge breaks into shifts
     const shiftsWithBreaks = records.map(shift => ({
@@ -637,6 +678,7 @@ export class DatabaseStorage implements IStorage {
 
     return shiftsWithBreaks as (Shift & { user: SafeUser; breaks: Break[] })[];
   }
+
   async getIncompleteShiftsBeforeDate(userId: string, beforeDate: string): Promise<Shift[]> {
     return await db
       .select()
@@ -672,6 +714,37 @@ export class DatabaseStorage implements IStorage {
     }
 
     return shift;
+  }
+
+  async getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]> {
+    const activeShifts = await db
+      .select({
+        // Spread all shift fields manually to ensure type safety
+        id: shifts.id,
+        userId: shifts.userId,
+        date: shifts.date,
+        morningClockIn: shifts.morningClockIn,
+        morningClockOut: shifts.morningClockOut,
+        morningLateMinutes: shifts.morningLateMinutes,
+        eveningClockIn: shifts.eveningClockIn,
+        eveningClockOut: shifts.eveningClockOut,
+        eveningLateMinutes: shifts.eveningLateMinutes,
+        status: shifts.status,
+        notes: shifts.notes,
+        createdAt: shifts.createdAt,
+        // Include full user object for configuration access
+        user: users
+      })
+      .from(shifts)
+      .innerJoin(users, eq(shifts.userId, users.id))
+      .where(
+        or(
+          and(isNotNull(shifts.morningClockIn), isNull(shifts.morningClockOut)),
+          and(isNotNull(shifts.eveningClockIn), isNull(shifts.eveningClockOut))
+        )
+      );
+
+    return activeShifts;
   }
 
   // ============= BREAK METHODS =============
@@ -762,7 +835,7 @@ export class DatabaseStorage implements IStorage {
     return Number(result?.count || 0);
   }
 
-  async endStaleBraaks(userId: string, currentDate: string): Promise<number> {
+  async endStaleBreaks(userId: string, currentDate: string): Promise<number> {
     const now = new Date();
 
     // Find all breaks without end time that are not from today
@@ -881,15 +954,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -994,15 +1065,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1068,15 +1137,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1285,7 +1352,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(gte(shifts.date, startOfMonth), lte(shifts.date, endOfMonth)));
 
     const activeUsers = await db.select().from(users).where(eq(users.status, "active"));
-    const totalPossibleShifts = activeUsers.length * (now.getDate()); // Approximate for month-to-date
+    const totalPossibleShifts = activeUsers.length * (now.getDate());
 
     const presentShifts = monthlyShifts.filter(s => s.status === "present" || s.status === "late").length;
     const monthlyAttendance = totalPossibleShifts > 0 ? Math.round((presentShifts / totalPossibleShifts) * 100) : 0;
@@ -1429,15 +1496,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1501,15 +1566,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1625,15 +1688,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1680,15 +1741,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1806,15 +1865,13 @@ export class DatabaseStorage implements IStorage {
           salary: users.salary,
           status: users.status,
           shiftType: users.shiftType,
-          // One shift times
           shiftStartTime: users.shiftStartTime,
           shiftEndTime: users.shiftEndTime,
-          // Two shift times - ADDED
           morningShiftStart: users.morningShiftStart,
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          // Other fields
+          openShiftRequiredHours: users.openShiftRequiredHours, // Added
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,

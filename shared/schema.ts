@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, date, integer, time } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, decimal, varchar, timestamp, boolean, date, integer, time } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -43,8 +43,21 @@ export const users = pgTable("users", {
   emergencyContact: text("emergency_contact"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
+  openShiftRequiredHours: decimal("required_hours").default("8"),
+
 });
 
+// 2. NEW TABLE FOR BD TARGETS
+export const bdTargets = pgTable("bd_targets", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  month: text("month").notNull(), // Format: "YYYY-MM"
+  targetType: text("target_type").default("revenue"),
+  targetAmount: decimal("target_amount").notNull(),
+  achievedAmount: decimal("achieved_amount").default("0"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
 // Shifts table for daily clock in/out records (morning/evening shifts)
 export const shifts = pgTable("shifts", {
@@ -334,6 +347,11 @@ export const insertMonthlyArchiveSchema = createInsertSchema(monthlyArchive).omi
   createdAt: true,
 });
 
+export const insertBdTargetSchema = createInsertSchema(bdTargets).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -377,6 +395,9 @@ export type RequestComment = typeof requestComments.$inferSelect;
 
 export type InsertMonthlyArchive = z.infer<typeof insertMonthlyArchiveSchema>;
 export type MonthlyArchive = typeof monthlyArchive.$inferSelect;
+
+export type InsertBdTarget = z.infer<typeof insertBdTargetSchema>;
+export type BdTarget = typeof bdTargets.$inferSelect;
 
 export type LoginData = z.infer<typeof loginSchema>;
 
