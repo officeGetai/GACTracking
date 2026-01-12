@@ -101,6 +101,268 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useClickUpTasks, type ClickUpTask } from "@/hooks/useClickUpTasks";
 import type { Shift, Break, TargetItem, Target as TargetType } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { motion, useMotionValue, useTransform, animate } from "framer-motion";
+
+// --- Animated Counter Component ---
+function AnimatedCounter({ value }: { value: number }) {
+  const count = useMotionValue(0);
+  const rounded = useTransform(count, (latest) => Math.round(latest));
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    const controls = animate(count, value, {
+      duration: 1,
+      ease: "easeOut",
+    });
+    
+    const unsubscribe = rounded.on("change", (latest) => {
+      setDisplayValue(latest);
+    });
+
+    return () => {
+      controls.stop();
+      unsubscribe();
+    };
+  }, [value, count, rounded]);
+
+  return <span>{displayValue}</span>;
+}
+
+// --- TargetsSummary Type ---
+interface TargetsSummary {
+  target: { meetingTarget: number; orderTarget: number } | null;
+  meetings: { total: number; verified: number; rejected: number; items: TargetItem[] };
+  orders: { total: number; verified: number; rejected: number; items: TargetItem[] };
+}
+
+// --- StatCard Component ---
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  subValue,
+  color,
+}: {
+  icon: any;
+  label: string;
+  value: number | string;
+  subValue?: string;
+  color: string;
+}) {
+  const colorClasses: Record<string, string> = {
+    blue: "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+    emerald: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+    purple: "bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800",
+    amber: "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+  };
+  return (
+    <div className={cn("p-4 rounded-xl border", colorClasses[color] || colorClasses.blue)}>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon className="w-4 h-4" />
+        <span className="text-xs font-medium opacity-80">{label}</span>
+      </div>
+      <p className="text-2xl font-bold">{value}</p>
+      {subValue && <p className="text-xs opacity-70 mt-1">{subValue}</p>}
+    </div>
+  );
+}
+
+// --- CircularProgress Component ---
+function CircularProgress({
+  value,
+  size = 80,
+  strokeWidth = 8,
+  color = "blue",
+}: {
+  value: number;
+  size?: number;
+  strokeWidth?: number;
+  color?: string;
+}) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - (value / 100) * circumference;
+  const colorMap: Record<string, string> = {
+    blue: "stroke-blue-500",
+    emerald: "stroke-emerald-500",
+    purple: "stroke-purple-500",
+    amber: "stroke-amber-500",
+  };
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg className="transform -rotate-90" width={size} height={size}>
+        <circle cx={size / 2} cy={size / 2} r={radius} strokeWidth={strokeWidth} className="fill-none stroke-slate-200 dark:stroke-slate-700" />
+        <circle cx={size / 2} cy={size / 2} r={radius} strokeWidth={strokeWidth} className={cn("fill-none transition-all duration-500", colorMap[color])} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-lg font-bold">{Math.round(value)}%</span>
+      </div>
+    </div>
+  );
+}
+
+// --- EnhancedEntryCard Component ---
+function EnhancedEntryCard({
+  entry,
+  type,
+  index,
+  onDelete,
+  onEdit,
+}: {
+  entry: TargetItem;
+  type: "meeting" | "order";
+  index: number;
+  onDelete: (id: string) => void;
+  onEdit: (entry: TargetItem) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+      className={cn(
+        "p-4 rounded-xl border transition-all",
+        entry.verified
+          ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800"
+          : entry.isRejected
+          ? "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800"
+          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            {entry.verified ? (
+              <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : entry.isRejected ? (
+              <X className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            ) : (
+              <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
+            )}
+            <h4 className="font-semibold text-slate-900 dark:text-white truncate">{entry.name}</h4>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>{entry.date ? format(new Date(entry.date), "MMM dd, yyyy") : "No date"}</span>
+            {entry.source && <Badge variant="outline" className="text-xs">{entry.source}</Badge>}
+          </div>
+        </div>
+        {!entry.verified && !entry.isRejected && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <MoreHorizontal className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEdit(entry)}>
+                <Edit3 className="w-4 h-4 mr-2" />Edit
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onDelete(entry.id)} className="text-rose-600">
+                <Trash2 className="w-4 h-4 mr-2" />Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// --- AddEntryModal Component ---
+function AddEntryModal({
+  type,
+  open,
+  onOpenChange,
+  onSuccess,
+  editEntry,
+}: {
+  type: "Meeting" | "Order";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: () => void;
+  editEntry?: TargetItem | null;
+}) {
+  const [name, setName] = useState("");
+  const [source, setSource] = useState("");
+  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (editEntry) {
+      setName(editEntry.name);
+      setSource(editEntry.source || "");
+      setDate(editEntry.date ? format(new Date(editEntry.date), "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"));
+    } else {
+      setName("");
+      setSource("");
+      setDate(format(new Date(), "yyyy-MM-dd"));
+    }
+  }, [editEntry, open]);
+
+  const handleSubmit = async () => {
+    if (!name.trim()) {
+      toast({ title: "Error", description: "Please enter a name", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const endpoint = editEntry
+        ? `/api/employee/targets/items/${editEntry.id}`
+        : "/api/employee/targets/items";
+      const method = editEntry ? "PATCH" : "POST";
+      const res = await apiRequest(method, endpoint, {
+        name: name.trim(),
+        type: type.toLowerCase(),
+        source: source || null,
+        date: date || null,
+      });
+      if (!res.ok) throw new Error("Failed to save entry");
+      toast({ title: "Success", description: editEntry ? "Entry updated" : `${type} added successfully` });
+      onSuccess();
+      onOpenChange(false);
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to save", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editEntry ? `Edit ${type}` : `Add ${type}`}</DialogTitle>
+          <DialogDescription>
+            {editEntry ? `Update the ${type.toLowerCase()} details` : `Record a new ${type.toLowerCase()} entry`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div>
+            <Label>Client/Company Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter name" className="mt-1" />
+          </div>
+          <div>
+            <Label>Source</Label>
+            <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g., LinkedIn, Facebook" className="mt-1" />
+          </div>
+          <div>
+            <Label>Date</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            {editEntry ? "Update" : "Add"} {type}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // --- Types ---
 interface TodayStatus {
@@ -723,7 +985,7 @@ function DevelopmentTasksBoard() {
         <AlertTitle className="text-amber-800 dark:text-amber-400">ClickUp Integration</AlertTitle>
         <AlertDescription className="text-amber-700 dark:text-amber-500">
           {apiError}
-          <Button variant="link" onClick={() => refetch()} className="ml-2 text-amber-600 p-0 h-auto">
+          <Button variant="ghost" onClick={() => refetch()} className="ml-2 text-amber-600 p-0 h-auto">
             Try Again
           </Button>
         </AlertDescription>
@@ -1201,8 +1463,8 @@ export default function EmployeeDashboard() {
       return { start: startToday, end: endToday, unlock: unlockToday, isYesterday: false };
     };
 
-    const morningTimes = getEffectiveShiftTimes(user?.morningShiftStart, user?.morningShiftEnd);
-    const eveningTimes = getEffectiveShiftTimes(user?.eveningShiftStart, user?.eveningShiftEnd);
+    const morningTimes = getEffectiveShiftTimes(user?.morningShiftStart ?? undefined, user?.morningShiftEnd ?? undefined);
+    const eveningTimes = getEffectiveShiftTimes(user?.eveningShiftStart ?? undefined, user?.eveningShiftEnd ?? undefined);
 
     // Morning shift logic
     let isMorningUnlocked = false;
