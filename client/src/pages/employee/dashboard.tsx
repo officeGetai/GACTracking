@@ -307,7 +307,791 @@ const BreakTypeCard = ({
   );
 };
 
+// === BUSINESS DEVELOPMENT BOARD ===
+function BusinessDevelopmentBoard() {
+  const [isMeetingOpen, setIsMeetingOpen] = useState(false);
+  const [isOrderOpen, setIsOrderOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<"all" | "verified" | "pending" | "rejected">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isMeetingsExpanded, setIsMeetingsExpanded] = useState(true);
+  const [isOrdersExpanded, setIsOrdersExpanded] = useState(true);
+  const [editingEntry, setEditingEntry] = useState<TargetItem | null>(null);
+  const [editingType, setEditingType] = useState<"Meeting" | "Order">("Meeting");
+  const { toast } = useToast();
+
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  const { data: targetsSummary, isLoading, refetch } = useQuery<TargetsSummary>({
+    queryKey: ["/api/employee/targets/summary", currentMonth],
+    queryFn: async () => {
+      const res = await fetch(`/api/employee/targets/summary?month=${currentMonth}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch targets");
+      return res.json();
+    },
+    staleTime: 60000,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/employee/targets/items/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/employee/targets/summary"] });
+      toast({ title: "Deleted", description: "Entry deleted successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to delete entry", variant: "destructive" });
+    },
+  });
+
+  const meetings = targetsSummary?.meetings?.items || [];
+  const orders = targetsSummary?.orders?.items || [];
+  const meetingsTarget = targetsSummary?.target?.meetingTarget || 20;
+  const meetingsAchieved = targetsSummary?.meetings?.total || 0;
+  const meetingsProgress = meetingsTarget > 0 ? (meetingsAchieved / meetingsTarget) * 100 : 0;
+  const meetingsVerified = targetsSummary?.meetings?.verified || 0;
+  const ordersTarget = targetsSummary?.target?.orderTarget || 5;
+  const ordersAchieved = targetsSummary?.orders?.total || 0;
+  const ordersProgress = ordersTarget > 0 ? (ordersAchieved / ordersTarget) * 100 : 0;
+  const ordersVerified = targetsSummary?.orders?.verified || 0;
+
+  const meetingsRejected = meetings.filter(m => m.isRejected).length;
+  const ordersRejected = orders.filter(o => o.isRejected).length;
+
+  const combinedProgress = ((meetingsAchieved + ordersAchieved) / (meetingsTarget + ordersTarget)) * 100;
+
+  const filteredMeetings = useMemo(() => {
+    return meetings.filter(m => {
+      const matchesFilter = activeFilter === "all" || (activeFilter === "verified" && m.verified) || (activeFilter === "pending" && (!m.verified && !m.isRejected)) || (activeFilter === "rejected" && !!m.isRejected);
+      const matchesSearch = !searchQuery || m.name.toLowerCase().includes(searchQuery.toLowerCase()) || (m.source?.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesFilter && matchesSearch;
+    });
+  }, [meetings, activeFilter, searchQuery]);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      const matchesFilter = activeFilter === "all" || (activeFilter === "verified" && o.verified) || (activeFilter === "pending" && (!o.verified && !o.isRejected)) || (activeFilter === "rejected" && !!o.isRejected);
+      const matchesSearch = !searchQuery || o.name.toLowerCase().includes(searchQuery.toLowerCase()) || (o.source?.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesFilter && matchesSearch;
+    });
+  }, [orders, activeFilter, searchQuery]);
+
+  const handleDelete = (id: string) => {
+    if (window.confirm("Are you sure you want to delete this entry? Permanent deletion is only allowed for unverified mistakes.")) {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  const handleEdit = (entry: TargetItem) => {
+    setEditingEntry(entry);
+    setEditingType(entry.type === "meeting" ? "Meeting" : "Order");
+    if (entry.type === "meeting") setIsMeetingOpen(true);
+    else setIsOrderOpen(true);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <p className="text-sm text-slate-500">Loading business targets...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-700">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 text-white shadow-2xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+
+        <div className="relative z-10">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30">
+                  <TargetIcon className="w-8 h-8" />
+                </div>
+                <div className="absolute -top-1 -right-1">
+                  <span className="flex h-4 w-4">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500" />
+                  </span>
+                </div>
+              </div>
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight">Business Development</h2>
+                <p className="text-slate-400 mt-1">Monthly Performance Dashboard • {format(new Date(), "MMMM yyyy")}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="ghost" size="sm" onClick={() => refetch()} className="text-white/70 hover:text-white hover:bg-white/10">
+                <RefreshCw className="w-4 h-4 mr-2" />Refresh
+              </Button>
+              <Badge className="bg-white/10 text-white border-white/20 px-4 py-2 text-sm backdrop-blur-sm">
+                <Sparkles className="w-4 h-4 mr-2 text-amber-400" />Live Data
+              </Badge>
+              <Button onClick={() => { setEditingEntry(null); setIsMeetingOpen(true); }} className="bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25">
+                <Plus className="w-4 h-4 mr-2" />Add Meeting
+              </Button>
+              <Button onClick={() => { setEditingEntry(null); setIsOrderOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-500/25">
+                <Plus className="w-4 h-4 mr-2" />Add Order
+              </Button>
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 lg:gap-6">
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-blue-500/20"><TrendingUp className="w-4 h-4 text-blue-400" /></div>
+                <span className="text-sm font-medium text-blue-300">Active Meetings</span>
+              </div>
+              <div className="text-4xl font-bold mb-2"><AnimatedCounter value={meetingsAchieved} /><span className="text-lg text-slate-500 font-normal">/{meetingsTarget}</span></div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-1000" style={{ width: `${Math.min(meetingsProgress, 100)}%` }} />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                {meetingsVerified} verified • {meetingsAchieved - meetingsVerified} pending • {meetingsRejected} rejected
+              </p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-emerald-500/20"><Zap className="w-4 h-4 text-emerald-400" /></div>
+                <span className="text-sm font-medium text-emerald-300">Active Orders</span>
+              </div>
+              <div className="text-4xl font-bold mb-2"><AnimatedCounter value={ordersAchieved} /><span className="text-lg text-slate-500 font-normal">/{ordersTarget}</span></div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-full transition-all duration-1000" style={{ width: `${Math.min(ordersProgress, 100)}%` }} />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                {ordersVerified} verified • {ordersAchieved - ordersVerified} pending • {ordersRejected} rejected
+              </p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-amber-500/20"><CheckCircle className="w-4 h-4 text-amber-400" /></div>
+                <span className="text-sm font-medium text-amber-300">Verified</span>
+              </div>
+              <div className="text-4xl font-bold mb-2">{meetingsVerified + ordersVerified}<span className="text-lg text-slate-500 font-normal">/{meetingsAchieved + ordersAchieved}</span></div>
+              <p className="text-xs text-slate-500">Total verified entries</p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 flex flex-col items-center justify-center">
+              <CircularProgress value={Math.min(combinedProgress, 100)} size={100} strokeWidth={8} color="purple" />
+              <p className="text-sm font-medium text-purple-300 mt-3">Overall Progress</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+        <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/50">
+          {[
+            { key: "all", label: "All", count: meetings.length + orders.length },
+            { key: "verified", label: "Verified", count: meetingsVerified + ordersVerified },
+            { key: "pending", label: "Pending", count: (meetings.length - meetingsVerified - meetingsRejected) + (orders.length - ordersVerified - ordersRejected) },
+            { key: "rejected", label: "Rejected", count: meetingsRejected + ordersRejected }
+          ].map(({ key, label, count }) => (
+            <button key={key} onClick={() => setActiveFilter(key as any)} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all", activeFilter === key ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+              {label}<Badge variant="secondary" className="text-xs h-5 px-1.5">{count}</Badge>
+            </button>
+          ))}
+        </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input placeholder="Search clients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 w-full sm:w-64 h-10 bg-white dark:bg-slate-900" />
+        </div>
+      </div>
+
+      {/* Content Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Meetings Panel */}
+        <Collapsible open={isMeetingsExpanded} onOpenChange={setIsMeetingsExpanded}>
+          <Card className="overflow-hidden border-slate-200/80 dark:border-slate-800/80 shadow-xl">
+            <div className="bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 p-5">
+              <CollapsibleTrigger className="w-full">
+                <div className="flex items-center justify-between text-white">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-white/20"><TrendingUp className="w-5 h-5" /></div>
+                    <div className="text-left">
+                      <h3 className="font-bold text-lg">Meetings</h3>
+                      <p className="text-blue-100 text-sm">{filteredMeetings.length} entries this month</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge className="bg-white/20 text-white border-0 px-3 py-1">{Math.round(meetingsProgress)}%</Badge>
+                    {isMeetingsExpanded ? <ChevronUp className="w-5 h-5 text-white/70" /> : <ChevronDown className="w-5 h-5 text-white/70" />}
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+              <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-full bg-white rounded-full transition-all duration-1000" style={{ width: `${Math.min(meetingsProgress, 100)}%` }} />
+              </div>
+            </div>
+            <CollapsibleContent>
+              <ScrollArea className="h-[400px]">
+                <div className="p-5 space-y-4">
+                  {filteredMeetings.length === 0 ? (
+                    <div className="text-center py-16">
+                      <Circle className="w-16 h-16 mx-auto text-slate-300 mb-4" />
+                      <p className="text-base font-medium text-slate-600">No meetings found</p>
+                      <Button onClick={() => { setEditingEntry(null); setIsMeetingOpen(true); }} className="mt-4 bg-blue-600 hover:bg-blue-700">
+                        <Plus className="w-4 h-4 mr-2" />Add Meeting
+                      </Button>
+                    </div>
+                  ) : (
+                    filteredMeetings.map((meeting, idx) => (
+                      <EnhancedEntryCard key={meeting.id} entry={meeting} type="meeting" index={idx} onDelete={handleDelete} onEdit={handleEdit} />
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Orders Panel */}
+        <Collapsible open={isOrdersExpanded} onOpenChange={setIsOrdersExpanded}>
+          <Card className="overflow-hidden border-slate-200/80 dark:border-slate-800/80 shadow-xl">
+            <div className="bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 p-5">
+              <CollapsibleTrigger className="w-full">
+                <div className="flex items-center justify-between text-white">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-white/20"><Zap className="w-5 h-5" /></div>
+                    <div className="text-left">
+                      <h3 className="font-bold text-lg">Orders</h3>
+                      <p className="text-emerald-100 text-sm">{filteredOrders.length} entries this month</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge className="bg-white/20 text-white border-0 px-3 py-1">{Math.round(ordersProgress)}%</Badge>
+                    {isOrdersExpanded ? <ChevronUp className="w-5 h-5 text-white/70" /> : <ChevronDown className="w-5 h-5 text-white/70" />}
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+              <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-full bg-white rounded-full transition-all duration-1000" style={{ width: `${Math.min(ordersProgress, 100)}%` }} />
+              </div>
+            </div>
+            <CollapsibleContent>
+              <ScrollArea className="h-[400px]">
+                <div className="p-5 space-y-4">
+                  {filteredOrders.length === 0 ? (
+                    <div className="text-center py-16">
+                      <Circle className="w-16 h-16 mx-auto text-slate-300 mb-4" />
+                      <p className="text-base font-medium text-slate-600">No orders found</p>
+                      <Button onClick={() => { setEditingEntry(null); setIsOrderOpen(true); }} className="mt-4 bg-emerald-600 hover:bg-emerald-700">
+                        <Plus className="w-4 h-4 mr-2" />Add Order
+                      </Button>
+                    </div>
+                  ) : (
+                    filteredOrders.map((order, idx) => (
+                      <EnhancedEntryCard key={order.id} entry={order} type="order" index={idx} onDelete={handleDelete} onEdit={handleEdit} />
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={TrendingUp} label="Meetings This Month" value={meetingsAchieved} subValue={`Target: ${meetingsTarget}`} color="blue" />
+        <StatCard icon={Zap} label="Orders This Month" value={ordersAchieved} subValue={`Target: ${ordersTarget}`} color="emerald" />
+        <StatCard icon={CheckCircle} label="Verification Rate" value={`${meetingsAchieved + ordersAchieved > 0 ? Math.round(((meetingsVerified + ordersVerified) / (meetingsAchieved + ordersAchieved)) * 100) : 0}%`} subValue={`${meetingsVerified + ordersVerified} verified entries`} color="purple" />
+        <StatCard icon={Award} label="Days Remaining" value={30 - parseInt(format(new Date(), "d"))} subValue={`${format(new Date(), "MMMM")} ends soon`} color="amber" />
+      </div>
+
+      {/* Modals */}
+      <AddEntryModal type="Meeting" open={isMeetingOpen} onOpenChange={(open) => { setIsMeetingOpen(open); if (!open) setEditingEntry(null); }} onSuccess={() => refetch()} editEntry={editingType === "Meeting" ? editingEntry : null} />
+      <AddEntryModal type="Order" open={isOrderOpen} onOpenChange={(open) => { setIsOrderOpen(open); if (!open) setEditingEntry(null); }} onSuccess={() => refetch()} editEntry={editingType === "Order" ? editingEntry : null} />
+    </div>
+  );
+}
+
+// === DEVELOPMENT TASKS BOARD - CLICKUP INTEGRATION ===
+function DevelopmentTasksBoard() {
+  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedProject, setSelectedProject] = useState<string>("all");
+  const [isExpanded, setIsExpanded] = useState(true);
+  const { toast } = useToast();
+
+  const { data, isLoading, error, refetch } = useClickUpTasks(selectedMonth);
+  const tasks = data?.tasks || [];
+  const clickUpUser = data?.clickUpUser;
+  const apiError = data?.error;
+
+  const projects = useMemo(() => {
+    const projectSet = new Set<string>();
+    tasks.forEach(task => {
+      if (task.project?.name && !task.project.hidden) projectSet.add(task.project.name);
+      if (task.folder?.name && !task.folder.hidden) projectSet.add(task.folder.name);
+    });
+    return Array.from(projectSet).sort();
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(task => {
+      const matchesSearch = !searchQuery ||
+        task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        task.list?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+
+      const matchesProject = selectedProject === "all" ||
+        task.project?.name === selectedProject ||
+        task.folder?.name === selectedProject;
+
+      return matchesSearch && matchesProject;
+    });
+  }, [tasks, searchQuery, selectedProject]);
+
+  const groupedTasks = useMemo(() => {
+    const groups: Record<string, ClickUpTask[]> = {};
+
+    filteredTasks.forEach(task => {
+      const dateKey = task.date_done
+        ? format(new Date(parseInt(task.date_done)), "yyyy-MM-dd")
+        : "No Date";
+
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(task);
+    });
+
+    return Object.entries(groups)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, dateTasks]) => ({ date, tasks: dateTasks }));
+  }, [filteredTasks]);
+
+  const totalCompleted = tasks.length;
+  const thisWeekCompleted = useMemo(() => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return tasks.filter(t => {
+      if (!t.date_done) return false;
+      const doneDate = new Date(parseInt(t.date_done));
+      return doneDate >= weekAgo;
+    }).length;
+  }, [tasks]);
+
+  const monthOptions = useMemo(() => {
+    const options = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      options.push({
+        value: format(date, "yyyy-MM"),
+        label: format(date, "MMMM yyyy")
+      });
+    }
+    return options;
+  }, []);
+
+  const getPriorityColor = (priority: string | undefined) => {
+    switch (priority?.toLowerCase()) {
+      case "urgent": return "bg-red-500";
+      case "high": return "bg-orange-500";
+      case "normal": return "bg-blue-500";
+      case "low": return "bg-slate-400";
+      default: return "bg-slate-300";
+    }
+  };
+
+  const getPriorityBadgeClass = (priority: string | undefined) => {
+    switch (priority?.toLowerCase()) {
+      case "urgent": return "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300";
+      case "high": return "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300";
+      case "normal": return "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300";
+      case "low": return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+      default: return "bg-slate-100 text-slate-600";
+    }
+  };
+
+  if (apiError) {
+    return (
+      <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800">
+        <AlertTriangle className="h-4 w-4 text-amber-600" />
+        <AlertTitle className="text-amber-800 dark:text-amber-400">ClickUp Integration</AlertTitle>
+        <AlertDescription className="text-amber-700 dark:text-amber-500">
+          {apiError}
+          <Button variant="link" onClick={() => refetch()} className="ml-2 text-amber-600 p-0 h-auto">
+            Try Again
+          </Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-700">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-900 via-purple-800 to-indigo-900 p-8 text-white shadow-2xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-pink-500/20 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-cyan-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+
+        <div className="relative z-10">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-cyan-500 to-purple-600 shadow-lg shadow-purple-500/30">
+                  <CheckCircle className="w-8 h-8" />
+                </div>
+                {clickUpUser && (
+                  <div className="absolute -top-1 -right-1">
+                    <span className="flex h-4 w-4">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500" />
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight">ClickUp Tasks</h2>
+                <p className="text-slate-300 mt-1">
+                  Completed Tasks • {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}
+                  {clickUpUser && (
+                    <span className="ml-2 text-cyan-300">
+                      • {clickUpUser.username}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="w-[180px] bg-white/10 border-white/20 text-white">
+                  <Calendar className="w-4 h-4 mr-2" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                className="text-white/70 hover:text-white hover:bg-white/10"
+                disabled={isLoading}
+              >
+                <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
+                Refresh
+              </Button>
+
+              <Badge className="bg-white/10 text-white border-white/20 px-4 py-2 text-sm backdrop-blur-sm">
+                <Sparkles className="w-4 h-4 mr-2 text-cyan-400" />
+                ClickUp Sync
+              </Badge>
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 lg:gap-6">
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-emerald-500/20">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                </div>
+                <span className="text-sm font-medium text-emerald-300">Completed</span>
+              </div>
+              <div className="text-4xl font-bold mb-1">
+                <AnimatedCounter value={totalCompleted} />
+              </div>
+              <p className="text-xs text-slate-400">Tasks this month</p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-cyan-500/20">
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                </div>
+                <span className="text-sm font-medium text-cyan-300">This Week</span>
+              </div>
+              <div className="text-4xl font-bold mb-1">
+                <AnimatedCounter value={thisWeekCompleted} />
+              </div>
+              <p className="text-xs text-slate-400">Last 7 days</p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-purple-500/20">
+                  <BarChart3 className="w-4 h-4 text-purple-400" />
+                </div>
+                <span className="text-sm font-medium text-purple-300">Projects</span>
+              </div>
+              <div className="text-4xl font-bold mb-1">
+                <AnimatedCounter value={projects.length} />
+              </div>
+              <p className="text-xs text-slate-400">Active projects</p>
+            </div>
+
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-amber-500/20">
+                  <TrendingUp className="w-4 h-4 text-amber-400" />
+                </div>
+                <span className="text-sm font-medium text-amber-300">Daily Avg</span>
+              </div>
+              <div className="text-4xl font-bold mb-1">
+                {totalCompleted > 0 ? (totalCompleted / 30).toFixed(1) : "0"}
+              </div>
+              <p className="text-xs text-slate-400">Tasks per day</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-1">
+        <div className="flex items-center gap-3">
+          <Select value={selectedProject} onValueChange={setSelectedProject}>
+            <SelectTrigger className="w-[200px] h-10 bg-white dark:bg-slate-900">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="All Projects" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Projects</SelectItem>
+              {projects.map(project => (
+                <SelectItem key={project} value={project}>{project}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Badge variant="secondary" className="h-10 px-4">
+            {filteredTasks.length} tasks
+          </Badge>
+        </div>
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search tasks..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 w-full sm:w-64 h-10 bg-white dark:bg-slate-900"
+          />
+        </div>
+      </div>
+
+      {/* Tasks List */}
+      <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+        <Card className="overflow-hidden border-slate-200/80 dark:border-slate-800/80 shadow-xl">
+          <div className="bg-gradient-to-r from-purple-500 via-violet-600 to-indigo-600 p-5">
+            <CollapsibleTrigger className="w-full">
+              <div className="flex items-center justify-between text-white">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-white/20">
+                    <CheckCircle className="w-5 h-5" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-bold text-lg">Completed Tasks</h3>
+                    <p className="text-purple-100 text-sm">
+                      {filteredTasks.length} tasks completed this month
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {isExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-white/70" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-white/70" />
+                  )}
+                </div>
+              </div>
+            </CollapsibleTrigger>
+          </div>
+
+          <CollapsibleContent>
+            <ScrollArea className="h-[500px]">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+                </div>
+              ) : filteredTasks.length === 0 ? (
+                <div className="text-center py-20">
+                  <Circle className="w-16 h-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+                  <p className="text-base font-medium text-slate-600 dark:text-slate-400">No completed tasks found</p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Tasks you complete in ClickUp will appear here
+                  </p>
+                </div>
+              ) : (
+                <div className="p-5 space-y-6">
+                  {groupedTasks.map(({ date, tasks: dateTasks }) => (
+                    <div key={date} className="space-y-3">
+                      {/* Date Header */}
+                      <div className="flex items-center gap-3">
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                        <Badge variant="outline" className="bg-white dark:bg-slate-900 px-3 py-1">
+                          <Calendar className="w-3 h-3 mr-2" />
+                          {date === "No Date" ? date : format(new Date(date), "EEEE, MMM dd")}
+                        </Badge>
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                      </div>
+
+                      {/* Tasks */}
+                      <div className="grid gap-3">
+                        {dateTasks.map((task, idx) => (
+                          <div
+                            key={task.id}
+                            className={cn(
+                              "group relative overflow-hidden rounded-xl border transition-all duration-300",
+                              "bg-white dark:bg-slate-900",
+                              "border-slate-200 dark:border-slate-800",
+                              "hover:shadow-lg hover:shadow-purple-500/10",
+                              "hover:border-purple-300 dark:hover:border-purple-700",
+                              "animate-in slide-in-from-bottom-2 fade-in"
+                            )}
+                            style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
+                          >
+                            {/* Priority indicator */}
+                            <div className={cn(
+                              "absolute top-0 left-0 bottom-0 w-1",
+                              getPriorityColor(task.priority?.priority)
+                            )} />
+
+                            <div className="p-4 pl-5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                                    <h4 className="font-semibold text-slate-900 dark:text-white truncate">
+                                      {task.name}
+                                    </h4>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                    <span className="flex items-center gap-1">
+                                      <span
+                                        className="w-2 h-2 rounded-full"
+                                        style={{ backgroundColor: task.status.color }}
+                                      />
+                                      {task.status.status}
+                                    </span>
+                                    <span>•</span>
+                                    <span>{task.list?.name || "No List"}</span>
+                                    {task.folder?.name && !task.folder.hidden && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{task.folder.name}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {task.priority && (
+                                    <Badge
+                                      variant="secondary"
+                                      className={cn("text-xs capitalize", getPriorityBadgeClass(task.priority.priority))}
+                                    >
+                                      {task.priority.priority}
+                                    </Badge>
+                                  )}
+
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        onClick={() => window.open(task.url, '_blank')}
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Open in ClickUp</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </div>
+
+                              {/* Tags */}
+                              {task.tags && task.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-3">
+                                  {task.tags.map((tag, i) => (
+                                    <span
+                                      key={i}
+                                      className="px-2 py-0.5 rounded text-xs font-medium"
+                                      style={{
+                                        backgroundColor: tag.tag_bg,
+                                        color: tag.tag_fg
+                                      }}
+                                    >
+                                      {tag.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Completion time */}
+                              {task.date_done && (
+                                <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  Completed at {format(new Date(parseInt(task.date_done)), "hh:mm a")}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+
+      {/* Quick Stats Footer */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          icon={CheckCircle}
+          label="Completed This Month"
+          value={totalCompleted}
+          color="purple"
+        />
+        <StatCard
+          icon={Zap}
+          label="This Week"
+          value={thisWeekCompleted}
+          color="blue"
+        />
+        <StatCard
+          icon={BarChart3}
+          label="Active Projects"
+          value={projects.length}
+          color="emerald"
+        />
+        <StatCard
+          icon={Award}
+          label="Days Remaining"
+          value={new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate()}
+          subValue={`${format(new Date(), "MMMM")} ends soon`}
+          color="amber"
+        />
+      </div>
+    </div>
+  );
+}
 // === MAIN DASHBOARD COMPONENT ===
+
 export default function EmployeeDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const currentHour = new Date().getHours();
@@ -1409,7 +2193,11 @@ export default function EmployeeDashboard() {
             </Card>
           </div>
         </div>
+        {/* Business Development Board */}
+        {user?.department === "Business Development" && <BusinessDevelopmentBoard />}
 
+        {/* Development Tasks Board - ClickUp Integration */}
+        {user?.department === "Development" && <DevelopmentTasksBoard />}
         {/* ============================================ */}
         {/* REPORT DIALOG - ONLY WORK DETAILS REQUIRED */}
         {/* ============================================ */}

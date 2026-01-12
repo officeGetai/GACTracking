@@ -148,14 +148,6 @@ const employeeNavItems = [
     gradient: "from-violet-400 to-violet-600",
     glow: "shadow-violet-500/25",
   },
-  // ADDED: My Targets (Visible if they are BD, or generally)
-  {
-    title: "My Targets",
-    url: "/employee/targets",
-    icon: Target,
-    gradient: "from-red-400 to-rose-600",
-    glow: "shadow-rose-500/25",
-  },
   {
     title: "Shift Report",
     url: "/employee/shift-report",
