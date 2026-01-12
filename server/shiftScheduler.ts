@@ -212,7 +212,73 @@ async function checkAndAutoCloseShifts() {
             }
 
             // ============================================================
-            // 2. AUTO-CLOSE LOGIC (1 Hour after End Time)
+            // 2. AUTO-CLOSE WARNING (15 minutes before auto-close)
+            // ============================================================
+
+            // Skip for Open Shifts
+            if (user.shiftType !== 'open') {
+                let warningEndTime: string | null = null;
+                let warningStartTime: string | null = null;
+                let warningClockInTime: Date | null = null;
+                let warningShiftPeriod: string = "";
+
+                // Get the active shift details for warning
+                if (shift.morningClockIn && !shift.morningClockOut) {
+                    warningEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
+                    warningStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
+                    warningClockInTime = new Date(shift.morningClockIn);
+                    warningShiftPeriod = "morning";
+                } else if (shift.eveningClockIn && !shift.eveningClockOut) {
+                    warningEndTime = user.eveningShiftEnd;
+                    warningStartTime = user.eveningShiftStart;
+                    warningClockInTime = new Date(shift.eveningClockIn);
+                    warningShiftPeriod = "evening";
+                }
+
+                if (warningEndTime && warningClockInTime && user.phone) {
+                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, warningStartTime, warningEndTime, warningClockInTime);
+                    const autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
+                    const warningTime = new Date(autoCloseTime.getTime() - (15 * 60 * 1000)); // 15 minutes before auto-close
+                    
+                    const minutesUntilAutoClose = (autoCloseTime.getTime() - now.getTime()) / (1000 * 60);
+
+                    // Send warning if we're within 15 minutes of auto-close AND shift hasn't auto-closed yet
+                    if (minutesUntilAutoClose > 0 && minutesUntilAutoClose <= 15) {
+                        // Check if warning was already sent
+                        const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
+                        const alreadyWarned = logs.some(log =>
+                            log.action === "auto_close_warning_sent" &&
+                            (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000) // Within last 2 hours
+                        );
+
+                        if (!alreadyWarned) {
+                            console.log(`[ShiftScheduler] Sending auto-close warning to ${user.username}`);
+
+                            const warningMessage = `Your ${warningShiftPeriod} shift will be AUTOMATICALLY CLOSED in ${Math.ceil(minutesUntilAutoClose)} minutes. Please submit your report and end your shift now to avoid forced closure.`;
+
+                            try {
+                                await notifyShiftReportReminder({
+                                    fullName: `${user.firstName} ${user.lastName}`,
+                                    phone: user.phone,
+                                    whatsappPreference: user.whatsappPreference
+                                }, warningMessage, wasenderSettings);
+
+                                await storage.createActivityLog({
+                                    userId: user.id,
+                                    action: "auto_close_warning_sent",
+                                    details: `Sent auto-close warning: ${Math.ceil(minutesUntilAutoClose)} minutes remaining`,
+                                    timestamp: now
+                                });
+                            } catch (err) {
+                                console.error(`[ShiftScheduler] Failed to send auto-close warning to ${user.username}:`, err);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ============================================================
+            // 3. AUTO-CLOSE LOGIC (1 Hour after End Time)
             // ============================================================
 
             // Skip Auto-Close for Open Shifts (they close manually or via max-duration stale check)
