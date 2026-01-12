@@ -124,8 +124,8 @@ async function checkShiftOvertime() {
                     whatsappPreference: user.whatsappPreference
                 };
 
-                // 1. Force Close Condition: > 2h 15m (135 minutes)
-                if (overtimeMinutes >= 135) {
+                // Force Close Condition: >= 2h (120 minutes) after shift end
+                if (overtimeMinutes >= 120) {
                     console.log(`Force closing shift for ${user.username} - Overtime: ${overtimeMinutes}m`);
 
                     const updateData: Partial<Shift> = {};
@@ -137,21 +137,12 @@ async function checkShiftOvertime() {
                     await storage.createActivityLog({
                         userId: user.id,
                         action: "auto_close_shift",
-                        details: `Force closed ${shiftTypeStr} after 2h 15m overtime`,
+                        details: `Force closed ${shiftTypeStr} after 2h overtime`,
                         timestamp: now
                     });
 
                     // Notify User
                     await notifyAutoClosed(employeeForNotify, settings);
-
-                }
-                // 2. Alert Condition: > 2h (120 minutes) AND Not Notified
-                else if (overtimeMinutes >= 120 && !shift.overtimeNotificationSent) {
-                    console.log(`Sending overtime alert for ${user.username} - Overtime: ${overtimeMinutes}m`);
-
-                    await notifyShiftOvertime(employeeForNotify, overtimeMinutes, settings);
-
-                    await storage.updateShift(shift.id, { overtimeNotificationSent: true } as any);
                 }
             }
         }

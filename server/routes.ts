@@ -588,19 +588,22 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
     for (const shift of incompleteShifts) {
       // Auto-complete shifts that weren't properly ended
       const updates: any = { status: "incomplete" };
+      
+      // Use scheduledDate for cross-midnight shifts, fallback to shift.date for legacy records
+      const baseDate = (shift as any).scheduledDate || shift.date;
 
       if (shift.morningClockIn && !shift.morningClockOut) {
         let autoCloseTime: Date;
 
-        // Use user-specific configuration
+        // Use user-specific configuration with scheduledDate for accurate timing
         if (user?.shiftType === 'one_shift' && user.shiftEndTime) {
-          // One shift: Use user's configured end time + 1 hour buffer (Auto-Close logic)
-          autoCloseTime = parseUserTime(shift.date, user.shiftEndTime);
-          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
+          // One shift: Use user's configured end time + 2 hour buffer (Auto-Close logic)
+          autoCloseTime = parseUserTime(baseDate, user.shiftEndTime);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (2 * 60 * 60 * 1000));
         } else if (user?.shiftType === 'two_shifts' && user.morningShiftEnd) {
-          // Two shifts: Use morning shift end time + 1 hour buffer
-          autoCloseTime = parseUserTime(shift.date, user.morningShiftEnd);
-          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
+          // Two shifts: Use morning shift end time + 2 hour buffer
+          autoCloseTime = parseUserTime(baseDate, user.morningShiftEnd);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (2 * 60 * 60 * 1000));
         } else {
           // Fallback: 12 hours after clock-in for open/unconfigured shifts
           autoCloseTime = new Date(shift.morningClockIn);
@@ -620,11 +623,11 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
       if (shift.eveningClockIn && !shift.eveningClockOut) {
         let autoCloseTime: Date;
 
-        // Use user-specific configuration
+        // Use user-specific configuration with scheduledDate for accurate timing
         if (user?.shiftType === 'two_shifts' && user.eveningShiftEnd) {
-          // Two shifts: Use evening shift end time + 1 hour buffer
-          autoCloseTime = parseUserTime(shift.date, user.eveningShiftEnd);
-          autoCloseTime = new Date(autoCloseTime.getTime() + (1 * 60 * 60 * 1000));
+          // Two shifts: Use evening shift end time + 2 hour buffer
+          autoCloseTime = parseUserTime(baseDate, user.eveningShiftEnd);
+          autoCloseTime = new Date(autoCloseTime.getTime() + (2 * 60 * 60 * 1000));
         } else {
           // Fallback: 12 hours after clock-in for open/unconfigured shifts
           autoCloseTime = new Date(shift.eveningClockIn);

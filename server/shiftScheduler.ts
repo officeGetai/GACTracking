@@ -4,7 +4,7 @@ import { notifyShiftReportReminder, type WasenderSettings } from "./wasender";
 
 // Configuration
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
-const AUTO_CLOSE_DELAY_HOURS = 1; // Close 1 hour after shift end time
+const AUTO_CLOSE_DELAY_HOURS = 2; // Close 2 hours after shift end time
 
 // Helper to get WASENDER settings
 async function getWasenderSettings(): Promise<WasenderSettings> {
@@ -321,14 +321,14 @@ async function checkAndAutoCloseShifts() {
                         // 2. Set Morning Clock Out
                         await storage.updateShift(shift.id, {
                             morningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 1h after shift end"
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 2h after shift end"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Morning shift auto-closed (1h after configured end time: ${scheduledEndTime})`,
+                            details: `Morning shift auto-closed (2h after configured end time: ${scheduledEndTime})`,
                             timestamp: now
                         });
 
@@ -369,14 +369,14 @@ async function checkAndAutoCloseShifts() {
                         // 2. Set Evening Clock Out
                         await storage.updateShift(shift.id, {
                             eveningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 1h after shift end"
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 2h after shift end"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Evening shift auto-closed (1h after configured end time: ${scheduledEndTime})`,
+                            details: `Evening shift auto-closed (2h after configured end time: ${scheduledEndTime})`,
                             timestamp: now
                         });
 
