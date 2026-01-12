@@ -11,8 +11,10 @@ const PAKISTAN_TIMEZONE_OFFSET = 5 * 60; // 5 hours in minutes
 export interface WasenderSettings {
   instanceId?: string | null;
   apiToken: string | null;
-  groupId: string | null;
   isActive: boolean | null;
+  requestsGroupId?: string | null;
+  shiftReportsGroupId?: string | null;
+  trackingAlertsGroupId?: string | null;
 }
 
 interface Employee {
@@ -29,8 +31,10 @@ export async function getWasenderSettings(): Promise<WasenderSettings> {
   const config = await storage.getWasenderConfig();
   return {
     apiToken: config?.apiToken || null,
-    groupId: config?.groupId || null,
     isActive: config?.isActive || false,
+    requestsGroupId: config?.requestsGroupId || null,
+    shiftReportsGroupId: config?.shiftReportsGroupId || null,
+    trackingAlertsGroupId: config?.trackingAlertsGroupId || null,
   };
 }
 
@@ -139,8 +143,21 @@ async function sendNotification(
   const targets: string[] = [];
   const preference = employee.whatsappPreference || "both"; // Default to both if not set
 
-  // Use the single configured groupId for all group notifications
-  const groupToSendTo = settings.groupId;
+  // Determine the correct group ID based on notification type
+  let groupToSendTo: string | null | undefined = null;
+  switch (notificationType) {
+    case "report":
+      groupToSendTo = settings.shiftReportsGroupId;
+      break;
+    case "shift":
+    case "break":
+    case "alert":
+      groupToSendTo = settings.trackingAlertsGroupId;
+      break;
+    case "request":
+      groupToSendTo = settings.requestsGroupId;
+      break;
+  }
 
   // 1. Determine if we should send to Group
   // Only send to group if a group ID is configured for this type and it's not a personal reminder.
@@ -397,11 +414,11 @@ export async function sendTestMessage(settings: WasenderSettings): Promise<{ suc
     return { success: false, message: "API Token is missing" };
   }
 
-  // Find a target to send to
-  const target = settings.groupId;
+  // Find a target to send to - try any configured group
+  const target = settings.requestsGroupId || settings.shiftReportsGroupId || settings.trackingAlertsGroupId;
 
   if (!target) {
-    return { success: false, message: "No WhatsApp group ID configured to test with." };
+    return { success: false, message: "No WhatsApp group IDs configured. Please set at least one group ID." };
   }
 
   const message = `🔔 *GAC Trackings System Test*

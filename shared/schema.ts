@@ -140,12 +140,15 @@ export const activityLogs = pgTable("activity_logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// WASENDER API configuration
+// WASENDER API configuration with three separate group IDs
 export const wasenderConfig = pgTable("wasender_config", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   instanceId: text("instance_id"),
   apiToken: text("api_token"),
   groupId: text("group_id"),
+  requestsGroupId: text("requests_group_id"),
+  shiftReportsGroupId: text("shift_reports_group_id"),
+  trackingAlertsGroupId: text("tracking_alerts_group_id"),
   isActive: boolean("is_active").default(false),
   lastTested: timestamp("last_tested"),
   updatedAt: timestamp("updated_at").defaultNow(),

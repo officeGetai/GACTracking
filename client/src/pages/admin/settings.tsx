@@ -55,7 +55,9 @@ const wasenderFormSchema = z.object({
   instanceId: z.string().min(1, "Instance ID is required"),
   apiToken: z.string().optional(),
   isActive: z.boolean().default(false),
-  groupId: z.string().optional().or(z.literal("")),
+  requestsGroupId: z.string().optional().or(z.literal("")),
+  shiftReportsGroupId: z.string().optional().or(z.literal("")),
+  trackingAlertsGroupId: z.string().optional().or(z.literal("")),
 });
 
 type WasenderFormData = z.infer<typeof wasenderFormSchema>;
@@ -64,7 +66,9 @@ type WasenderUpdatePayload = {
   instanceId: string;
   apiToken?: string | null;
   isActive: boolean;
-  groupId?: string | null;
+  requestsGroupId?: string | null;
+  shiftReportsGroupId?: string | null;
+  trackingAlertsGroupId?: string | null;
 };
 
 export default function SettingsPage() {
@@ -81,7 +85,9 @@ export default function SettingsPage() {
       instanceId: "",
       apiToken: "",
       isActive: false,
-      groupId: "",
+      requestsGroupId: "",
+      shiftReportsGroupId: "",
+      trackingAlertsGroupId: "",
     },
   });
 
@@ -91,7 +97,9 @@ export default function SettingsPage() {
         instanceId: wasenderConfig.instanceId || "",
         apiToken: "",
         isActive: wasenderConfig.isActive || false,
-        groupId: wasenderConfig.groupId || "",
+        requestsGroupId: wasenderConfig.requestsGroupId || "",
+        shiftReportsGroupId: wasenderConfig.shiftReportsGroupId || "",
+        trackingAlertsGroupId: wasenderConfig.trackingAlertsGroupId || "",
       });
     }
   }, [wasenderConfig, wasenderForm]);
@@ -147,7 +155,9 @@ export default function SettingsPage() {
       instanceId: formData.instanceId,
       isActive: formData.isActive,
       apiToken: formData.apiToken === "" ? null : formData.apiToken,
-      groupId: formData.groupId === "" ? null : formData.groupId,
+      requestsGroupId: formData.requestsGroupId === "" ? null : formData.requestsGroupId,
+      shiftReportsGroupId: formData.shiftReportsGroupId === "" ? null : formData.shiftReportsGroupId,
+      trackingAlertsGroupId: formData.trackingAlertsGroupId === "" ? null : formData.trackingAlertsGroupId,
     };
 
     updateWasenderMutation.mutate(payload);
@@ -158,7 +168,9 @@ export default function SettingsPage() {
       instanceId: wasenderConfig?.instanceId || "",
       apiToken: "",
       isActive: wasenderConfig?.isActive || false,
-      groupId: wasenderConfig?.groupId || "",
+      requestsGroupId: wasenderConfig?.requestsGroupId || "",
+      shiftReportsGroupId: wasenderConfig?.shiftReportsGroupId || "",
+      trackingAlertsGroupId: wasenderConfig?.trackingAlertsGroupId || "",
     });
     setWasenderDialogOpen(true);
   };
@@ -214,10 +226,12 @@ export default function SettingsPage() {
                           : "No instance configured"
                         }
                       </p>
-                      {wasenderConfig?.groupId && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Group ID: {wasenderConfig.groupId}
-                        </p>
+                      {(wasenderConfig?.requestsGroupId || wasenderConfig?.shiftReportsGroupId || wasenderConfig?.trackingAlertsGroupId) && (
+                        <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
+                          {wasenderConfig.requestsGroupId && <p>Requests Group: {wasenderConfig.requestsGroupId}</p>}
+                          {wasenderConfig.shiftReportsGroupId && <p>Shift Reports Group: {wasenderConfig.shiftReportsGroupId}</p>}
+                          {wasenderConfig.trackingAlertsGroupId && <p>Tracking Alerts Group: {wasenderConfig.trackingAlertsGroupId}</p>}
+                        </div>
                       )}
                       {wasenderConfig?.lastTested && (
                         <p className="text-xs text-muted-foreground mt-1">
@@ -309,19 +323,59 @@ export default function SettingsPage() {
 
                                   <FormField
                                     control={wasenderForm.control}
-                                    name="groupId"
+                                    name="requestsGroupId"
                                     render={({ field }) => (
                                       <FormItem>
-                                        <FormLabel>WhatsApp Group ID</FormLabel>
+                                        <FormLabel>Requests Group ID (GAC REQUESTS)</FormLabel>
                                         <FormControl>
                                           <Input
-                                            placeholder="WhatsApp group ID for notifications"
+                                            placeholder="WhatsApp group ID for special requests"
                                             {...field}
-                                            data-testid="input-group-id"
+                                            data-testid="input-requests-group-id"
                                           />
                                         </FormControl>
                                         <FormDescription>
-                                          All notifications will be sent to this WhatsApp group.
+                                          For special requests and approval notifications.
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={wasenderForm.control}
+                                    name="shiftReportsGroupId"
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Shift Reports Group ID (GAC SHIFT REPORTS)</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder="WhatsApp group ID for shift reports"
+                                            {...field}
+                                            data-testid="input-shift-reports-group-id"
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          For daily shift report submissions.
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                  <FormField
+                                    control={wasenderForm.control}
+                                    name="trackingAlertsGroupId"
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Tracking Alerts Group ID (GAC TRACKING ALERTS)</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder="WhatsApp group ID for tracking alerts"
+                                            {...field}
+                                            data-testid="input-tracking-alerts-group-id"
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          For clock in/out, breaks, and late arrival alerts.
                                         </FormDescription>
                                         <FormMessage />
                                       </FormItem>

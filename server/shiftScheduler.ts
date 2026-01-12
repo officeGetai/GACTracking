@@ -11,8 +11,10 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
     const config = await storage.getWasenderConfig();
     return {
         apiToken: config?.apiToken || null,
-        groupId: config?.groupId || null,
         isActive: config?.isActive || false,
+        requestsGroupId: config?.requestsGroupId || null,
+        shiftReportsGroupId: config?.shiftReportsGroupId || null,
+        trackingAlertsGroupId: config?.trackingAlertsGroupId || null,
     };
 }
 
