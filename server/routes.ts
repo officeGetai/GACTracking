@@ -238,6 +238,54 @@ function parseUserTime(dateStr: string, timeStr: string): Date {
   return result;
 }
 
+/**
+ * Calculate the correct scheduled date for a shift based on clock-in time and scheduled start.
+ * This handles cross-midnight scenarios where an employee clocks in before midnight
+ * for a shift that starts after midnight.
+ * 
+ * @param clockInTime - The actual clock-in timestamp
+ * @param scheduledStartTimeStr - The scheduled start time (HH:MM)
+ * @param workingDate - The working date assigned by the system (YYYY-MM-DD)
+ * @returns The correct scheduled date (YYYY-MM-DD)
+ */
+function calculateScheduledDate(
+  clockInTime: Date,
+  scheduledStartTimeStr: string | null,
+  workingDate: string
+): string {
+  // If no scheduled start time, use the working date as-is
+  if (!scheduledStartTimeStr) {
+    return workingDate;
+  }
+  
+  const [startHours, startMinutes] = scheduledStartTimeStr.split(':').map(Number);
+  
+  // Build the scheduled start on the working date
+  const scheduledStartOnWorkingDate = new Date(workingDate + 'T00:00:00');
+  scheduledStartOnWorkingDate.setHours(startHours, startMinutes || 0, 0, 0);
+  
+  // Check if clock-in is significantly before the scheduled start (more than 2 hours)
+  // This would indicate the employee clocked in the day before for an early morning shift
+  const timeDiffMs = scheduledStartOnWorkingDate.getTime() - clockInTime.getTime();
+  const hoursBeforeStart = timeDiffMs / (1000 * 60 * 60);
+  
+  // If the scheduled start appears to be MORE than 2 hours after clock-in,
+  // AND the scheduled start is in early morning (before 6 AM),
+  // the scheduled date should be the NEXT day from the working date
+  if (hoursBeforeStart > 2 && startHours < 6) {
+    // The working date was recorded as the previous day; the actual shift is for the next day
+    const nextDay = new Date(workingDate + 'T00:00:00');
+    nextDay.setDate(nextDay.getDate() + 1);
+    return nextDay.toISOString().split('T')[0];
+  }
+  
+  // If clock-in is AFTER the scheduled start by more than 22 hours,
+  // it likely means the shift was for the previous day but that's a late clock-in scenario
+  // which we don't adjust for
+  
+  return workingDate;
+}
+
 // Middleware to check if user is authenticated
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
@@ -1291,6 +1339,9 @@ export async function registerRoutes(
       console.log(`  - Grace Period: ${GRACE_PERIOD_MINUTES} minutes`);
       console.log(`  - Late Minutes: ${lateMinutes}`);
 
+      // Calculate the correct scheduled date for cross-midnight handling
+      const scheduledDate = calculateScheduledDate(now, scheduledStartTime, workingDate);
+
       if (shift) {
         // Update existing shift record
         shift = await storage.updateShift(shift.id, {
@@ -1298,12 +1349,14 @@ export async function registerRoutes(
           morningClockOut: null,
           morningLateMinutes: lateMinutes,
           status: lateMinutes > 0 ? "late" : "present",
+          scheduledDate,
         });
       } else {
         // Create new shift record
         shift = await storage.createShift({
           userId,
           date: workingDate,
+          scheduledDate,
           morningClockIn: now,
           morningLateMinutes: lateMinutes,
           status: lateMinutes > 0 ? "late" : "present",
@@ -1540,17 +1593,22 @@ export async function registerRoutes(
       console.log(`  - Grace Period: ${GRACE_PERIOD_MINUTES} minutes`);
       console.log(`  - Late Minutes: ${lateMinutes}`);
 
+      // Calculate the correct scheduled date for cross-midnight handling
+      const scheduledDate = calculateScheduledDate(now, scheduledStartTime, workingDate);
+
       if (shift) {
         shift = await storage.updateShift(shift.id, {
           eveningClockIn: now,
           eveningClockOut: null,
           eveningLateMinutes: lateMinutes,
           status: shift.status === "not_started" ? (lateMinutes > 0 ? "late" : "present") : shift.status,
+          scheduledDate,
         });
       } else {
         shift = await storage.createShift({
           userId,
           date: workingDate,
+          scheduledDate,
           eveningClockIn: now,
           eveningLateMinutes: lateMinutes,
           status: lateMinutes > 0 ? "late" : "present",

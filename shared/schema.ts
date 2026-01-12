@@ -70,6 +70,8 @@ export const shifts = pgTable("shifts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   date: date("date").notNull(),
+  // Scheduled date - the intended working date based on shift schedule (may differ from date for cross-midnight shifts)
+  scheduledDate: date("scheduled_date"),
   // Morning shift
   morningClockIn: timestamp("morning_clock_in"),
   morningClockOut: timestamp("morning_clock_out"),

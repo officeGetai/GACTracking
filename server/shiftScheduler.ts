@@ -32,6 +32,60 @@ function parseUserTime(dateStr: string, timeStr: string): Date {
 }
 
 /**
+ * Calculate the correct end date/time for a shift, handling cross-midnight scenarios
+ * 
+ * This function uses the scheduledDate (if available) to determine the correct end time.
+ * For legacy shifts without scheduledDate, it falls back to heuristic-based calculation.
+ * 
+ * @param shiftDate - The shift's recorded date (YYYY-MM-DD)
+ * @param scheduledDate - The intended scheduled date (YYYY-MM-DD) - may be null for legacy records
+ * @param startTimeStr - Scheduled start time (HH:MM)
+ * @param endTimeStr - Scheduled end time (HH:MM)
+ * @param clockInTime - Actual clock-in time
+ * @returns Correct end Date object
+ */
+function calculateShiftEndDateTime(
+    shiftDate: string,
+    scheduledDate: string | null,
+    startTimeStr: string | null,
+    endTimeStr: string,
+    clockInTime: Date
+): Date {
+    const [endHours, endMinutes] = endTimeStr.split(':').map(Number);
+    const [startHours, startMinutes] = startTimeStr ? startTimeStr.split(':').map(Number) : [0, 0];
+    
+    // Use scheduledDate if available, otherwise fall back to shiftDate
+    const baseDate = scheduledDate || shiftDate;
+    
+    // Start with the base date
+    let endDate = new Date(baseDate + 'T00:00:00');
+    endDate.setHours(endHours, endMinutes || 0, 0, 0);
+    
+    const startMinutesTotal = startHours * 60 + (startMinutes || 0);
+    const endMinutesTotal = endHours * 60 + (endMinutes || 0);
+    
+    // Case 1: Classic cross-midnight shift (e.g., 22:00 - 06:00)
+    // Start is in evening (>= 12:00) and end is earlier than start (in morning)
+    if (startTimeStr && endMinutesTotal < startMinutesTotal && startHours >= 12) {
+        endDate.setDate(endDate.getDate() + 1);
+        return endDate;
+    }
+    
+    // For legacy shifts without scheduledDate, apply fallback logic
+    if (!scheduledDate) {
+        // Fallback: if end time is more than 12 hours before clock-in, add a day
+        if (endDate.getTime() < clockInTime.getTime()) {
+            const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
+            if (gapHours > 12) {
+                endDate.setDate(endDate.getDate() + 1);
+            }
+        }
+    }
+    
+    return endDate;
+}
+
+/**
  * Main scheduler function to check and auto-close shifts
  */
 async function checkAndAutoCloseShifts() {
@@ -76,16 +130,23 @@ async function checkAndAutoCloseShifts() {
             // B. CHECK FIXED SHIFTS (15 Minutes before End Time)
             else {
                 let scheduledEndTime: string | null = null;
+                let scheduledStartTime: string | null = null;
+                let clockInTime: Date | null = null;
 
                 // Determine relevant end time based on which shift is active
                 if (shift.morningClockIn && !shift.morningClockOut) {
                     scheduledEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
+                    scheduledStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
+                    clockInTime = new Date(shift.morningClockIn);
                 } else if (shift.eveningClockIn && !shift.eveningClockOut) {
                     scheduledEndTime = user.eveningShiftEnd;
+                    scheduledStartTime = user.eveningShiftStart;
+                    clockInTime = new Date(shift.eveningClockIn);
                 }
 
-                if (scheduledEndTime) {
-                    const endTime = parseUserTime(shiftDate, scheduledEndTime);
+                if (scheduledEndTime && clockInTime) {
+                    // Use cross-midnight aware calculation with scheduledDate
+                    const endTime = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
                     const minutesUntilEnd = (endTime.getTime() - now.getTime()) / (1000 * 60);
 
                     // If we are within 15 minutes of the end (and not passed it significantly)
@@ -151,15 +212,20 @@ async function checkAndAutoCloseShifts() {
             // --- CHECK MORNING SHIFT ---
             if (shift.morningClockIn && !shift.morningClockOut) {
                 let scheduledEndTime: string | null = null;
+                let scheduledStartTime: string | null = null;
 
                 if (user.shiftType === 'one_shift') {
                     scheduledEndTime = user.shiftEndTime;
+                    scheduledStartTime = user.shiftStartTime;
                 } else if (user.shiftType === 'two_shifts') {
                     scheduledEndTime = user.morningShiftEnd;
+                    scheduledStartTime = user.morningShiftStart;
                 }
 
                 if (scheduledEndTime) {
-                    const endDate = parseUserTime(shiftDate, scheduledEndTime);
+                    // Use the new cross-midnight aware function with scheduledDate
+                    const clockInTime = new Date(shift.morningClockIn);
+                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
                     const autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
 
                     if (now >= autoCloseTime) {
@@ -197,13 +263,17 @@ async function checkAndAutoCloseShifts() {
             // --- CHECK EVENING SHIFT ---
             if (shift.eveningClockIn && !shift.eveningClockOut) {
                 let scheduledEndTime: string | null = null;
+                let scheduledStartTime: string | null = null;
 
                 if (user.shiftType === 'two_shifts') {
                     scheduledEndTime = user.eveningShiftEnd;
+                    scheduledStartTime = user.eveningShiftStart;
                 }
 
                 if (scheduledEndTime) {
-                    const endDate = parseUserTime(shiftDate, scheduledEndTime);
+                    // Use the new cross-midnight aware function with scheduledDate
+                    const clockInTime = new Date(shift.eveningClockIn);
+                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
                     const autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
 
                     if (now >= autoCloseTime) {
