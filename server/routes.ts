@@ -23,6 +23,9 @@ import {
   notifyBreakStart,
   notifyBreakEnd,
   notifyDailyReportSubmitted,
+  notifyShiftReportReminder,
+  notifySpecialRequestCreated,
+  sendTestMessage,
   type WasenderSettings
 } from "./wasender";
 import connectPg from "connect-pg-simple";
@@ -33,7 +36,7 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
   const config = await storage.getWasenderConfig();
   return {
     apiToken: config?.apiToken || null,
-    groupId: config?.groupId || null,
+    groups: config?.groups || undefined,
     isActive: config?.isActive || false,
   };
 }
@@ -977,7 +980,7 @@ export async function registerRoutes(
   app.get("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
       const config = await storage.getWasenderConfig();
-      res.json(config || { instanceId: "", apiToken: "", groupId: "", isActive: false });
+      res.json(config || { instanceId: "", apiToken: "", groups: null, isActive: false });
     } catch (error) {
       console.error("Failed to fetch WASENDER config:", error);
       res.status(500).json({ error: "Failed to fetch WASENDER config" });
@@ -986,8 +989,8 @@ export async function registerRoutes(
 
   app.post("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
-      const { instanceId, apiToken, groupId, isActive } = req.body;
-      const config = await storage.updateWasenderConfig({ instanceId, apiToken, groupId, isActive });
+      const { instanceId, apiToken, groups, isActive } = req.body;
+      const config = await storage.updateWasenderConfig({ instanceId, apiToken, groups, isActive });
       res.json(config);
     } catch (error) {
       console.error("Failed to update WASENDER config:", error);
@@ -1002,8 +1005,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: "WASENDER not configured" });
       }
 
-      await storage.updateWasenderConfig({ lastTested: new Date() });
-      res.json({ success: true, message: "Connection successful" });
+      // Convert config to WasenderSettings format
+      const settings: WasenderSettings = {
+        apiToken: config.apiToken,
+        instanceId: config.instanceId,
+        isActive: config.isActive,
+        groups: config.groups || undefined
+      };
+
+      const result = await sendTestMessage(settings);
+
+      if (result.success) {
+        await storage.updateWasenderConfig({ lastTested: new Date() });
+        res.json({ success: true, message: result.message });
+      } else {
+        res.status(500).json({ error: result.message });
+      }
     } catch (error) {
       console.error("Failed to test WASENDER connection:", error);
       res.status(500).json({ error: "Failed to test WASENDER connection" });
@@ -1166,7 +1183,46 @@ export async function registerRoutes(
         if (!shift.morningClockOut) {
           return res.status(400).json({ error: "Morning shift already active" });
         }
-        return res.status(400).json({ error: "Morning shift already completed for today" });
+
+        // If it's NOT an open shift, prevent restart
+        const user = await storage.getUser(userId);
+        if (user?.shiftType !== 'open') {
+          return res.status(400).json({ error: "Morning shift already completed for today" });
+        }
+
+        // IF OPEN SHIFT IS COMPLETED: WE START A NEW ONE
+        // By setting shift to undefined, we trigger the creation logic below 
+        // (but we need to make sure we don't try to update the OLD shift)
+        // Actually, let's just forcefully create a NEW shift record here
+        const newShift = await storage.createShift({
+          userId,
+          date: workingDate, // Ensure we use the same working date
+          morningClockIn: now,
+          status: "present",
+        });
+
+        await storage.createActivityLog({
+          userId,
+          action: "clock_in",
+          details: `Morning shift started (Additional Session - Open Shift)`,
+          timestamp: now,
+          metadata: { shiftType: 'open', session: 'additional' }
+        });
+
+        // Notify
+        const wasenderSettings = await getWasenderSettings();
+        notifyShiftStart({
+          fullName: `${user.firstName} ${user.lastName}`,
+          department: user.department || "Not Assigned",
+          phone: user.phone,
+          whatsappPreference: user.whatsappPreference
+        }, wasenderSettings).catch(console.error);
+
+        return res.json({
+          success: true,
+          message: "Additional shift started successfully",
+          shift: newShift
+        });
       }
 
       // Check if user is on break
@@ -1181,21 +1237,37 @@ export async function registerRoutes(
       // =========================================================
       // REQUIREMENT: 2-Hour Start Restriction
       // =========================================================
+
       const isOpenShift = user?.shiftType === 'open';
 
       if (!isOpenShift) {
+        // Fetch scheduled start time
         const scheduledStartStr = getScheduledStartTime(user, 'morning');
+
         if (scheduledStartStr) {
-          // Parse scheduled start time (assuming stored as "09:00:00")
-          const todayString = now.toISOString().split('T')[0];
-          const scheduledStart = new Date(`${todayString}T${scheduledStartStr}`);
+          // Parse scheduled start time 
+          // scheduledStartStr is "HH:MM" or "HH:MM:SS"
+          const [h, m] = scheduledStartStr.split(':').map(Number);
+
+          const scheduledStart = new Date(now);
+          scheduledStart.setHours(h, m, 0, 0);
 
           // Calculate 2 hours before start
           const earliestStart = subHours(scheduledStart, 2);
 
+          // If current time is BEFORE the earliest allowed start time
           if (now < earliestStart) {
+            // Edge case: If scheduled start is e.g. 1 AM, earliest is 11 PM previous day.
+            // But we are comparing with 'now' which likely matches the date.
+            // We need to be careful with date boundaries if shifts cross midnight.
+            // For simplicity, assuming shift starts on the same day as 'now' mostly.
+
+            // Check if earliestStart is actually for TOMORROW vs today? 
+            // Logic: If I try to clock in at 8am for a 10am shift, now (8am) < earliest (8am) is false.
+            // If I try at 7am, now (7am) < 8am is true -> Block.
+
             return res.status(400).json({
-              error: `You cannot start the shift yet. Clock-in is allowed from ${format(earliestStart, 'hh:mm a')}`
+              error: `You cannot start the shift yet. Clock-in is allowed from ${format(earliestStart, 'hh:mm a')} (2 hours before shift)`
             });
           }
         }
@@ -2317,6 +2389,7 @@ export async function registerRoutes(
         loomVideos,    // Optional - can be null
         notes,         // Optional - can be null
         references,    // Optional - can be null
+        shiftType: req.body.shiftType, // New field from request
         month: req.body.month || new Date().toISOString().slice(0, 7),
       };
 
@@ -2340,7 +2413,8 @@ export async function registerRoutes(
               whatsappPreference: user.whatsappPreference
             },
             reportData.workDetails,
-            settings
+            settings,
+            req.body.shiftType // Pass shiftType to notification
           )
         ).catch(err => console.error("WhatsApp notification error:", err));
       }
@@ -2400,6 +2474,7 @@ export async function registerRoutes(
         loomVideos,    // Optional - can be null
         notes,         // Optional - can be null
         references,    // Optional - can be null
+        shiftType: req.body.shiftType,
       });
 
       await storage.createActivityLog({
@@ -2515,6 +2590,10 @@ export async function registerRoutes(
   app.post("/api/requests/special", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
 
       // Validate required fields
       if (!req.body.title || req.body.title.trim() === '') {
@@ -2545,6 +2624,23 @@ export async function registerRoutes(
         details: `Created special request: ${requestData.title}`,
         timestamp: new Date(),
       });
+
+      // Send WhatsApp notification
+      if (user) {
+        getWasenderSettings().then(settings =>
+          notifySpecialRequestCreated(
+            {
+              fullName: `${user.firstName} ${user.lastName}`,
+              department: user.department || "Not Assigned",
+              phone: user.phone,
+              whatsappPreference: user.whatsappPreference
+            },
+            requestData.title,
+            requestData.details,
+            settings
+          )
+        ).catch(err => console.error("WhatsApp notification error:", err));
+      }
 
       res.json(request);
     } catch (error: any) {

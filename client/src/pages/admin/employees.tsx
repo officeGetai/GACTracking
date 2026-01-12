@@ -111,7 +111,7 @@ const shiftTimeRefinement = (data: any, ctx: z.RefinementCtx) => {
       });
     }
   }
-  
+
   if (data.shiftType === "two_shifts") {
     if (!data.morningShiftStart || data.morningShiftStart === "") {
       ctx.addIssue({
@@ -663,20 +663,15 @@ export default function EmployeesPage() {
                     </SelectContent>
                   </Select>
 
-                  <Dialog open={isDialogOpen} onOpenChange={(open) => {
-                    if (!open) handleDialogClose();
-                    else setIsDialogOpen(true);
-                  }}>
-                    <DialogTrigger asChild>
-                      <Button 
-                        onClick={handleAddNew} 
-                        className="h-11 px-5 rounded-xl shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Employee
-                      </Button>
-                    </DialogTrigger>
-                    
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <Button
+                      onClick={handleAddNew}
+                      className="h-11 px-5 rounded-xl shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Employee
+                    </Button>
+
                     {/* MODAL FORM */}
                     <DialogContent className="sm:max-w-2xl max-h-[90vh]">
                       <DialogHeader>
@@ -687,7 +682,17 @@ export default function EmployeesPage() {
                       </DialogHeader>
                       <ScrollArea className="max-h-[70vh] pr-4">
                         <Form {...form}>
-                          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                          <form
+                            onSubmit={form.handleSubmit(onSubmit, (errors) => {
+                              console.error("Form validation errors:", errors);
+                              toast({
+                                title: "Validation Error",
+                                description: "Please check all tabs for required fields.",
+                                variant: "destructive",
+                              });
+                            })}
+                            className="space-y-6"
+                          >
                             <Tabs defaultValue="basic" className="w-full">
                               <TabsList className="grid w-full grid-cols-3">
                                 <TabsTrigger value="basic">Basic Info</TabsTrigger>
@@ -801,8 +806,8 @@ export default function EmployeesPage() {
                                     render={({ field }) => (
                                       <FormItem>
                                         <FormLabel>Department</FormLabel>
-                                        <Select 
-                                          onValueChange={field.onChange} 
+                                        <Select
+                                          onValueChange={field.onChange}
                                           value={field.value || NO_DEPARTMENT}
                                         >
                                           <FormControl>
@@ -845,10 +850,10 @@ export default function EmployeesPage() {
                                       <FormItem className="col-span-2">
                                         <FormLabel>Salary (PKR)</FormLabel>
                                         <FormControl>
-                                          <Input 
-                                            type="number" 
-                                            placeholder="50000" 
-                                            {...field} 
+                                          <Input
+                                            type="number"
+                                            placeholder="50000"
+                                            {...field}
                                             value={field.value ?? ""}
                                             onChange={(e) => {
                                               const val = e.target.value;
@@ -871,7 +876,7 @@ export default function EmployeesPage() {
                                       Select the type of shift schedule for this employee
                                     </p>
                                   </div>
-                                  
+
                                   <FormField
                                     control={form.control}
                                     name="shiftType"
@@ -928,10 +933,10 @@ export default function EmployeesPage() {
                                                 Start Time *
                                               </FormLabel>
                                               <FormControl>
-                                                <Input 
-                                                  type="time" 
-                                                  {...field} 
-                                                  value={field.value || ""} 
+                                                <Input
+                                                  type="time"
+                                                  {...field}
+                                                  value={field.value || ""}
                                                 />
                                               </FormControl>
                                               <FormMessage />
@@ -948,10 +953,10 @@ export default function EmployeesPage() {
                                                 End Time *
                                               </FormLabel>
                                               <FormControl>
-                                                <Input 
-                                                  type="time" 
-                                                  {...field} 
-                                                  value={field.value || ""} 
+                                                <Input
+                                                  type="time"
+                                                  {...field}
+                                                  value={field.value || ""}
                                                 />
                                               </FormControl>
                                               <FormMessage />
@@ -981,10 +986,10 @@ export default function EmployeesPage() {
                                                   Start Time *
                                                 </FormLabel>
                                                 <FormControl>
-                                                  <Input 
-                                                    type="time" 
-                                                    {...field} 
-                                                    value={field.value || ""} 
+                                                  <Input
+                                                    type="time"
+                                                    {...field}
+                                                    value={field.value || ""}
                                                     className="border-amber-200 dark:border-amber-800"
                                                   />
                                                 </FormControl>
@@ -1002,10 +1007,10 @@ export default function EmployeesPage() {
                                                   End Time *
                                                 </FormLabel>
                                                 <FormControl>
-                                                  <Input 
-                                                    type="time" 
-                                                    {...field} 
-                                                    value={field.value || ""} 
+                                                  <Input
+                                                    type="time"
+                                                    {...field}
+                                                    value={field.value || ""}
                                                     className="border-amber-200 dark:border-amber-800"
                                                   />
                                                 </FormControl>
@@ -1033,10 +1038,10 @@ export default function EmployeesPage() {
                                                   Start Time *
                                                 </FormLabel>
                                                 <FormControl>
-                                                  <Input 
-                                                    type="time" 
-                                                    {...field} 
-                                                    value={field.value || ""} 
+                                                  <Input
+                                                    type="time"
+                                                    {...field}
+                                                    value={field.value || ""}
                                                     className="border-indigo-200 dark:border-indigo-800"
                                                   />
                                                 </FormControl>
@@ -1054,10 +1059,10 @@ export default function EmployeesPage() {
                                                   End Time *
                                                 </FormLabel>
                                                 <FormControl>
-                                                  <Input 
-                                                    type="time" 
-                                                    {...field} 
-                                                    value={field.value || ""} 
+                                                  <Input
+                                                    type="time"
+                                                    {...field}
+                                                    value={field.value || ""}
                                                     className="border-indigo-200 dark:border-indigo-800"
                                                   />
                                                 </FormControl>
@@ -1227,8 +1232,8 @@ export default function EmployeesPage() {
                       {filteredEmployees.map((employee, index) => {
                         const fullName = `${employee.firstName} ${employee.lastName}`;
                         return (
-                          <TableRow 
-                            key={employee.id} 
+                          <TableRow
+                            key={employee.id}
                             className={cn(
                               "group transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50",
                               index !== filteredEmployees.length - 1 && "border-b border-slate-100 dark:border-slate-800"
@@ -1290,8 +1295,8 @@ export default function EmployeesPage() {
                               )}
                             </TableCell>
                             <TableCell>
-                              <Badge 
-                                variant="outline" 
+                              <Badge
+                                variant="outline"
                                 className={cn(
                                   "font-medium capitalize border-0",
                                   employee.shiftType === "one_shift" && "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
@@ -1306,11 +1311,11 @@ export default function EmployeesPage() {
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge 
+                              <Badge
                                 className={cn(
                                   "font-medium border-0",
-                                  employee.role === "admin" 
-                                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" 
+                                  employee.role === "admin"
+                                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
                                     : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                                 )}
                               >
@@ -1322,14 +1327,14 @@ export default function EmployeesPage() {
                               <div className="flex items-center gap-2">
                                 <div className={cn(
                                   "w-2 h-2 rounded-full",
-                                  employee.isActive 
-                                    ? "bg-emerald-500 shadow-lg shadow-emerald-500/50" 
+                                  employee.isActive
+                                    ? "bg-emerald-500 shadow-lg shadow-emerald-500/50"
                                     : "bg-slate-300 dark:bg-slate-600"
                                 )} />
                                 <span className={cn(
                                   "text-sm font-medium",
-                                  employee.isActive 
-                                    ? "text-emerald-600 dark:text-emerald-400" 
+                                  employee.isActive
+                                    ? "text-emerald-600 dark:text-emerald-400"
                                     : "text-slate-500 dark:text-slate-400"
                                 )}>
                                   {employee.isActive ? "Active" : "Inactive"}
@@ -1339,9 +1344,9 @@ export default function EmployeesPage() {
                             <TableCell>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button 
-                                    size="icon" 
-                                    variant="ghost" 
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
                                     className="h-9 w-9 opacity-0 group-hover:opacity-100 transition-opacity"
                                   >
                                     <MoreVertical className="h-4 w-4" />
@@ -1375,8 +1380,8 @@ export default function EmployeesPage() {
                     <Users className="h-10 w-10 text-slate-400 dark:text-slate-500" />
                   </div>
                   <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    {searchQuery || departmentFilter !== "all" 
-                      ? "No employees found" 
+                    {searchQuery || departmentFilter !== "all"
+                      ? "No employees found"
                       : "No team members yet"
                     }
                   </h3>

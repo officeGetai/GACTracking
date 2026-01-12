@@ -1,5 +1,6 @@
+// shared/schema.ts
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, serial, decimal, varchar, timestamp, boolean, date, integer, time } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, varchar, timestamp, boolean, date, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -10,8 +11,6 @@ export const departments = pgTable("departments", {
   whatsappGroupId: text("whatsapp_group_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
-
-// shared/schema.ts - Update the users table to add these columns
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -28,10 +27,10 @@ export const users = pgTable("users", {
   shiftType: text("shift_type").notNull().default("one_shift"),
 
   // One shift times
-  shiftStartTime: text("shift_start_time"), // Changed from time() to text() for easier handling
+  shiftStartTime: text("shift_start_time"),
   shiftEndTime: text("shift_end_time"),
 
-  // Two shift times - ADD THESE COLUMNS
+  // Two shift times
   morningShiftStart: text("morning_shift_start"),
   morningShiftEnd: text("morning_shift_end"),
   eveningShiftStart: text("evening_shift_start"),
@@ -43,18 +42,25 @@ export const users = pgTable("users", {
   emergencyContact: text("emergency_contact"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
-  openShiftRequiredHours: decimal("required_hours").default("8"),
-
+  // Changed from decimal to text to avoid type issues with `storage.ts` using `String(value)`
+  openShiftRequiredHours: text("required_hours").default("8"),
 });
+// Add this new table definition in shared/schema.ts, for example, after the 'users' table
 
-// 2. NEW TABLE FOR BD TARGETS
+// Replace the old 'sessions' table definition with this one
+export const sessions = pgTable("session", {
+  sid: varchar("sid", { length: 255 }).primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire", { mode: "date", withTimezone: true }).notNull(),
+});
+// BD TARGETS TABLE (Amounts changed to text for flexible precision)
 export const bdTargets = pgTable("bd_targets", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().references(() => users.id),
   month: text("month").notNull(), // Format: "YYYY-MM"
   targetType: text("target_type").default("revenue"),
-  targetAmount: decimal("target_amount").notNull(),
-  achievedAmount: decimal("achieved_amount").default("0"),
+  targetAmount: text("target_amount").notNull(), // Changed from decimal to text
+  achievedAmount: text("achieved_amount").default("0"), // Changed from decimal to text
   updatedAt: timestamp("updated_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -121,26 +127,32 @@ export const targetItems = pgTable("target_items", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Activity logs for tracking all employee actions
+// Activity logs for tracking all employee actions (ADDED metadata column)
 export const activityLogs = pgTable("activity_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   action: text("action").notNull(), // 'clock_in', 'clock_out', 'break_start', 'break_end', etc.
   details: text("details"),
+  metadata: jsonb("metadata"), // New metadata column
   timestamp: timestamp("timestamp").notNull().defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// WASENDER API configuration
+// WASENDER API configuration (groupId removed, groups added)
 export const wasenderConfig = pgTable("wasender_config", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   instanceId: text("instance_id"),
   apiToken: text("api_token"), // Encrypted/stored securely
-  groupId: text("group_id"), // The 'to' parameter for WhatsApp group
   isActive: boolean("is_active").default(false),
   lastTested: timestamp("last_tested"),
   updatedAt: timestamp("updated_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
+  // New groups column to store specific WhatsApp group IDs as JSON
+  groups: jsonb("groups").$type<{
+    requests?: string | null;
+    shiftReports?: string | null;
+    trackingAlerts?: string | null;
+  }>(),
 });
 
 // Daily Shift Reports table
@@ -154,6 +166,7 @@ export const dailyShiftReports = pgTable("daily_shift_reports", {
   notes: text("notes"), // Additional notes
   references: text("references"), // JSON array of reference links
   month: text("month").notNull(), // Format: 'YYYY-MM' for archiving
+  shiftType: text("shift_type"), // 'morning' or 'evening'
   archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -203,6 +216,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   dailyShiftReports: many(dailyShiftReports),
   specialRequests: many(specialRequests),
   requestComments: many(requestComments),
+  bdTargets: many(bdTargets), // Added BD targets relation
 }));
 
 export const shiftsRelations = relations(shifts, ({ one, many }) => ({
@@ -284,6 +298,13 @@ export const requestCommentsRelations = relations(requestComments, ({ one }) => 
   }),
 }));
 
+export const bdTargetsRelations = relations(bdTargets, ({ one }) => ({
+  user: one(users, {
+    fields: [bdTargets.userId],
+    references: [users.id],
+  }),
+}));
+
 // Insert schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
   id: true,
@@ -320,9 +341,11 @@ export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
   createdAt: true,
 });
 
+// Updated WasenderConfig schema for insert
 export const insertWasenderConfigSchema = createInsertSchema(wasenderConfig).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertDailyShiftReportSchema = createInsertSchema(dailyShiftReports).omit({
@@ -359,7 +382,7 @@ export const loginSchema = z.object({
   role: z.enum(["admin", "employee"]),
 });
 
-// Types
+// Types (automatically inferred from Drizzle schemas)
 export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
 export type Department = typeof departments.$inferSelect;
 
@@ -381,8 +404,9 @@ export type TargetItem = typeof targetItems.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 
+// Updated WasenderConfig types
 export type InsertWasenderConfig = z.infer<typeof insertWasenderConfigSchema>;
-export type WasenderConfig = typeof wasenderConfig.$inferSelect;
+export type WasenderConfig = typeof wasenderConfig.$inferSelect; // This now correctly includes 'groups' and not 'groupId'
 
 export type InsertDailyShiftReport = z.infer<typeof insertDailyShiftReportSchema>;
 export type DailyShiftReport = typeof dailyShiftReports.$inferSelect;
@@ -406,7 +430,7 @@ export type SafeUser = Omit<User, "password">;
 
 // Break limits configuration
 export const BREAK_LIMITS = {
-  prayer: { maxPerDay: 3, shiftPeriod: "any" as const },      // ✅ Changed from "morning" to "any"
+  prayer: { maxPerDay: 3, shiftPeriod: "any" as const },
   meal: { maxPerDay: 1, shiftPeriod: "any" as const },
   urgent: { maxPerShift: 2, shiftPeriod: "any" as const },
 } as const;
@@ -432,11 +456,7 @@ export const SPECIAL_REQUEST_STATUSES = [
   "revision",
   "resolved",
 ] as const;
-// shared/schema.ts - Find and update the targetItems table
 
-
-
-// Also add at the bottom of the file, after WHATSAPP_PREFERENCES:
 // Business Development Sources
 export const BUSINESS_SOURCES = [
   "FB Yousaf", "FB Abdullah", "FB Get Ai",

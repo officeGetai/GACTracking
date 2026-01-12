@@ -12,7 +12,7 @@ import {
   specialRequests,
   requestComments,
   monthlyArchive,
-  bdTargets, // Added this import
+  bdTargets,
   type User,
   type InsertUser,
   type Shift,
@@ -25,7 +25,9 @@ import {
   type InsertTargetItem,
   type ActivityLog,
   type InsertActivityLog,
-  type WasenderConfig,
+  // IMPORTANT: Ensure this WasenderConfig type is from your updated shared/schema.ts
+  type WasenderConfig as WasenderConfigSchemaType,
+  // InsertWasenderConfig will typically map to the DB table's insert schema
   type InsertWasenderConfig,
   type Department,
   type InsertDepartment,
@@ -38,12 +40,26 @@ import {
   type MonthlyArchive,
   type InsertMonthlyArchive,
   type SafeUser,
-  type BdTarget, // Added this import
-  type InsertBdTarget, // Added this import
+  type BdTarget,
+  type InsertBdTarget,
   BREAK_LIMITS
 } from "@shared/schema";
 import { and, eq, isNull, isNotNull, lt, or, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import { db } from "./db";
+
+// Redefine WasenderConfig for internal use, based on the schema and what's passed in
+// This helps ensure type safety when interacting with the DB and notification service
+export interface WasenderSettings {
+  instanceId?: string | null;
+  apiToken: string | null;
+  isActive: boolean | null;
+  groups?: {
+    requests?: string | null;
+    shiftReports?: string | null;
+    trackingAlerts?: string | null;
+  };
+}
+
 
 // Type for shift with user data
 export interface ShiftWithUser extends Shift {
@@ -151,8 +167,8 @@ export interface IStorage {
   getRecentActivityLogs(limit?: number): Promise<(ActivityLog & { user: SafeUser })[]>;
 
   // WASENDER config methods
-  getWasenderConfig(): Promise<WasenderConfig | undefined>;
-  updateWasenderConfig(data: Partial<InsertWasenderConfig>): Promise<WasenderConfig>;
+  getWasenderConfig(): Promise<WasenderConfigSchemaType | undefined>;
+  updateWasenderConfig(data: Partial<InsertWasenderConfig>): Promise<WasenderConfigSchemaType>;
 
   // Department methods
   getDepartments(): Promise<Department[]>;
@@ -289,7 +305,7 @@ export class DatabaseStorage implements IStorage {
       'shiftStartTime', 'shiftEndTime',
       'morningShiftStart', 'morningShiftEnd',
       'eveningShiftStart', 'eveningShiftEnd',
-      'openShiftRequiredHours', // Added here
+      'openShiftRequiredHours',
       'phone', 'whatsappPreference', 'address', 'emergencyContact', 'isActive'
     ];
 
@@ -397,7 +413,7 @@ export class DatabaseStorage implements IStorage {
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      openShiftRequiredHours: users.openShiftRequiredHours, // Added
+      openShiftRequiredHours: users.openShiftRequiredHours,
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -427,7 +443,7 @@ export class DatabaseStorage implements IStorage {
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      openShiftRequiredHours: users.openShiftRequiredHours, // Added
+      openShiftRequiredHours: users.openShiftRequiredHours,
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -457,7 +473,7 @@ export class DatabaseStorage implements IStorage {
       morningShiftEnd: users.morningShiftEnd,
       eveningShiftStart: users.eveningShiftStart,
       eveningShiftEnd: users.eveningShiftEnd,
-      openShiftRequiredHours: users.openShiftRequiredHours, // Added
+      openShiftRequiredHours: users.openShiftRequiredHours,
       phone: users.phone,
       whatsappPreference: users.whatsappPreference,
       address: users.address,
@@ -543,7 +559,7 @@ export class DatabaseStorage implements IStorage {
             morningShiftEnd: users.morningShiftEnd,
             eveningShiftStart: users.eveningShiftStart,
             eveningShiftEnd: users.eveningShiftEnd,
-            openShiftRequiredHours: users.openShiftRequiredHours, // Added
+            openShiftRequiredHours: users.openShiftRequiredHours,
             phone: users.phone,
             whatsappPreference: users.whatsappPreference,
             address: users.address,
@@ -583,7 +599,8 @@ export class DatabaseStorage implements IStorage {
     const [shift] = await db
       .select()
       .from(shifts)
-      .where(and(eq(shifts.userId, userId), eq(shifts.date, date)));
+      .where(and(eq(shifts.userId, userId), eq(shifts.date, date)))
+      .orderBy(desc(shifts.createdAt));
     return shift || undefined;
   }
 
@@ -649,7 +666,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -960,7 +977,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1071,7 +1088,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1099,9 +1116,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActivityLogsByUser(userId: string, date?: string): Promise<ActivityLog[]> {
+    const selectFields = {
+      id: activityLogs.id,
+      userId: activityLogs.userId,
+      action: activityLogs.action,
+      details: activityLogs.details,
+      timestamp: activityLogs.timestamp,
+      createdAt: activityLogs.createdAt,
+      // ADDED: Explicitly select the metadata column
+      metadata: activityLogs.metadata,
+    };
+
     if (date) {
       return await db
-        .select()
+        .select(selectFields)
         .from(activityLogs)
         .where(and(
           eq(activityLogs.userId, userId),
@@ -1110,7 +1138,7 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(activityLogs.timestamp));
     }
     return await db
-      .select()
+      .select(selectFields)
       .from(activityLogs)
       .where(eq(activityLogs.userId, userId))
       .orderBy(desc(activityLogs.timestamp));
@@ -1125,6 +1153,8 @@ export class DatabaseStorage implements IStorage {
         details: activityLogs.details,
         timestamp: activityLogs.timestamp,
         createdAt: activityLogs.createdAt,
+        // ADDED: Explicitly select the metadata column
+        metadata: activityLogs.metadata,
         user: {
           id: users.id,
           username: users.username,
@@ -1143,7 +1173,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1162,22 +1192,28 @@ export class DatabaseStorage implements IStorage {
 
   // ============= WASENDER CONFIG METHODS =============
 
-  async getWasenderConfig(): Promise<WasenderConfig | undefined> {
+  async getWasenderConfig(): Promise<WasenderConfigSchemaType | undefined> {
     const [config] = await db.select().from(wasenderConfig).limit(1);
     return config || undefined;
   }
 
-  async updateWasenderConfig(data: Partial<InsertWasenderConfig>): Promise<WasenderConfig> {
+  async updateWasenderConfig(data: Partial<InsertWasenderConfig>): Promise<WasenderConfigSchemaType> {
     const existing = await this.getWasenderConfig();
+    const updatePayload: any = { ...data, updatedAt: new Date() };
+
     if (existing) {
+      // Ensure that if 'groups' is passed, it's correctly handled as a JSONB column
       const [updated] = await db
         .update(wasenderConfig)
-        .set({ ...data, updatedAt: new Date() })
+        .set(updatePayload)
         .where(eq(wasenderConfig.id, existing.id))
         .returning();
       return updated;
     } else {
-      const [created] = await db.insert(wasenderConfig).values(data).returning();
+      // For insertion, make sure all non-nullable fields are present
+      // This assumes `InsertWasenderConfig` directly maps to your Drizzle table insert type
+      // You might need to cast or provide defaults for required fields if `data` is partial
+      const [created] = await db.insert(wasenderConfig).values(updatePayload as any).returning();
       return created;
     }
   }
@@ -1264,7 +1300,7 @@ export class DatabaseStorage implements IStorage {
     ).length;
     const onTimeRate = totalShifts > 0 ? Math.round((onTimeShifts / totalShifts) * 100) : 0;
 
-    const avgWorkHours = 8;
+    const avgWorkHours = 8; // This might need a more dynamic calculation based on actual worked time
 
     const allBreaks = await db
       .select()
@@ -1502,7 +1538,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1572,7 +1608,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1694,7 +1730,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1747,7 +1783,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,
@@ -1871,7 +1907,7 @@ export class DatabaseStorage implements IStorage {
           morningShiftEnd: users.morningShiftEnd,
           eveningShiftStart: users.eveningShiftStart,
           eveningShiftEnd: users.eveningShiftEnd,
-          openShiftRequiredHours: users.openShiftRequiredHours, // Added
+          openShiftRequiredHours: users.openShiftRequiredHours,
           phone: users.phone,
           whatsappPreference: users.whatsappPreference,
           address: users.address,

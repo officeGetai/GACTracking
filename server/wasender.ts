@@ -1,8 +1,7 @@
 // server/wasender.ts
 
 // --- CONFIGURATION ---
-// IMPORTANT: Replace with your actual API endpoint if different. 
-// You had "https://wasenderapi.com/api/send-message" in your snippet.
+// IMPORTANT: Replace with your actual API endpoint if different.
 const WASENDER_API_URL = "https://wasenderapi.com/api/send-message";
 
 // Pakistan timezone offset (GMT+5)
@@ -10,10 +9,15 @@ const PAKISTAN_TIMEZONE_OFFSET = 5 * 60; // 5 hours in minutes
 
 // --- TYPES ---
 export interface WasenderSettings {
-  instanceId?: string | null; // Added for compatibility with some DB schemas
+  instanceId?: string | null;
   apiToken: string | null;
-  groupId: string | null;
+  // Removed: groupId: string | null; // Replaced by specific groups
   isActive: boolean | null;
+  groups?: { // Added groups object as per shared/schema.ts
+    requests?: string | null;       // For "GAC REQUESTS"
+    shiftReports?: string | null;   // For "GAC SHIFT REPORTS"
+    trackingAlerts?: string | null; // For "GAC TRACKING ALERTS"
+  };
 }
 
 interface Employee {
@@ -42,8 +46,7 @@ function formatTime(date: Date): string {
 
 function getSessionType(date: Date): string {
   const hour = date.getHours();
-  if (hour >= 5 && hour < 12) return "Morning";
-  if (hour >= 12 && hour < 17) return "Afternoon";
+  if (hour >= 5 && hour < 23) return "Morning";
   return "Evening";
 }
 
@@ -59,17 +62,17 @@ async function sendToTarget(target: string, text: string, token: string): Promis
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        number: target, // Note: Some APIs use 'to', some use 'number'. Your snippet used 'to', I switched to 'number' based on common WA APIs. Check your provider!
-        message: text,  // Note: Some APIs use 'text', some use 'message'.
-        // If your API specifically requires 'to' and 'text', revert these property names.
+        to: target, // Changed from 'number' to 'to' per API error
+        text: text, // Changed from 'message' to 'text' per API error
       }),
     });
 
     if (!response.ok) {
-      console.error(`WASENDER API error for target ${target}:`, await response.text());
+      console.error(`WASENDER API error for target ${target}: ${response.status} ${response.statusText}`, await response.text());
       return false;
     }
 
+    console.log(`WASENDER message sent successfully to ${target}.`);
     return true;
   } catch (error) {
     console.error(`Failed to send WhatsApp notification to ${target}:`, error);
@@ -78,35 +81,61 @@ async function sendToTarget(target: string, text: string, token: string): Promis
 }
 
 /**
- * Main function to handle notification logic based on preferences
+ * Main function to handle notification logic based on preferences and notification type
  */
 async function sendNotification(
   message: string,
   employee: Employee,
   settings: WasenderSettings,
-  notificationType: "shift" | "break" | "report" | "reminder"
+  // Added "request" and "alert" for future use; "report" is already in use.
+  notificationType: "shift" | "break" | "report" | "reminder" | "request" | "alert"
 ): Promise<void> {
   // Skip if not configured or not active
   if (!settings.apiToken || !settings.isActive) {
-    console.log("WASENDER not fully configured or not active, skipping notification");
+    console.log("WASENDER not fully configured or not active, skipping notification.");
     return;
   }
 
   const targets: string[] = [];
   const preference = employee.whatsappPreference || "both"; // Default to both if not set
 
-  // 1. Determine if we should send to Group (Skip for private reminders)
-  if (settings.groupId && notificationType !== "reminder") {
-    targets.push(settings.groupId);
+  // Determine the correct group ID based on notificationType
+  let groupToSendTo: string | null | undefined = null;
+  if (settings.groups) {
+    switch (notificationType) {
+      case "report":
+        // Only shift reports go to "GAC SHIFT REPORTS" group
+        groupToSendTo = settings.groups.shiftReports;
+        break;
+      case "shift":
+      case "break":
+      case "alert":
+        // Shift status, breaks, and alerts (late arrival, reminders, etc) go to "GAC TRACKING ALERTS" group
+        groupToSendTo = settings.groups.trackingAlerts;
+        break;
+      case "request":
+        // Special requests go to "GAC REQUESTS" group
+        groupToSendTo = settings.groups.requests;
+        break;
+      // "reminder" notifications are typically individual, so no group for them
+      default:
+        console.log(`Unknown notification type '${notificationType}', no specific group assigned.`);
+    }
+  }
+
+  // 1. Determine if we should send to Group
+  // Only send to group if a group ID is configured for this type and it's not a personal reminder.
+  if (groupToSendTo && groupToSendTo.trim() !== "" && notificationType !== "reminder") {
+    targets.push(groupToSendTo);
   }
 
   // 2. Determine if we should send to Individual
   // Check if employee has a phone number and their preference allows this notification type
   let shouldSendToIndividual = false;
 
-  if (employee.phone) {
+  if (employee.phone && employee.phone.trim() !== "") {
     if (notificationType === "reminder") {
-      shouldSendToIndividual = true; // Always send reminders if phone exists
+      shouldSendToIndividual = true; // Always send reminders to individual if phone exists
     } else {
       shouldSendToIndividual =
         preference === "both" ||
@@ -120,11 +149,11 @@ async function sendNotification(
   }
 
   if (targets.length === 0) {
-    console.log("No targets to send WhatsApp notification to.");
+    console.log(`No valid targets found for WhatsApp notification type '${notificationType}'.`);
     return;
   }
 
-  console.log(`Sending WhatsApp notification (${notificationType}) to ${targets.length} targets...`);
+  console.log(`Sending WhatsApp notification (${notificationType}) to ${targets.length} targets: ${targets.join(', ')}...`);
 
   // Send to all targets sequentially with delay to avoid rate limits
   let successCount = 0;
@@ -138,11 +167,17 @@ async function sendNotification(
       await new Promise(resolve => setTimeout(resolve, 7000));
     }
 
-    const success = await sendToTarget(target, message, settings.apiToken!);
-    if (success) successCount++;
+    // Ensure apiToken is not null or undefined before passing
+    if (settings.apiToken) {
+      const success = await sendToTarget(target, message, settings.apiToken);
+      if (success) successCount++;
+    } else {
+      console.error("WASENDER API token is missing, cannot send message.");
+      break; // Stop sending if token is missing
+    }
   }
 
-  console.log(`WhatsApp notifications sent: ${successCount}/${targets.length} successful.`);
+  console.log(`WhatsApp notifications sent: ${successCount}/${targets.length} successful for type '${notificationType}'.`);
 }
 
 // --- EXPORTED NOTIFICATION FUNCTIONS ---
@@ -195,7 +230,7 @@ export async function notifyShiftEnd(
 
 ✅ Employee has checked out successfully.`;
 
-  await sendNotification(message, employee, settings, "shift");
+  await sendNotification(message, employee, settings, "report");
 }
 
 export async function notifyBreakStart(employee: Employee, breakType: string, settings: WasenderSettings): Promise<void> {
@@ -241,22 +276,53 @@ export async function notifyBreakEnd(
 export async function notifyDailyReportSubmitted(
   employee: Employee,
   workDetails: string,
-  settings: WasenderSettings
+  settings: WasenderSettings,
+  shiftType?: string
 ): Promise<void> {
   const now = getPakistanTime();
+  // Fallback to time-based session type if shiftType is not provided
+  const sessionTypeFromTime = getSessionType(now);
+  const displayShiftType = shiftType && (shiftType === 'morning' || shiftType === 'evening')
+    ? shiftType.charAt(0).toUpperCase() + shiftType.slice(1)
+    : sessionTypeFromTime;
 
-  const message = `📝 DAILY REPORT SUBMITTED
+  const message = `📝 SHIFT REPORT SUBMITTED
 
 👤 Employee: ${employee.fullName}
 🏢 Department: ${employee.department}
 🕐 Submitted at: ${formatTime(now)}
+🌅 Shift Type: ${displayShiftType}
 
 📋 Work Summary:
 ${workDetails.substring(0, 200)}${workDetails.length > 200 ? '...' : ''}
 
 ✅ Report submitted successfully.`;
 
+  // Shift reports go to 'shiftReports' group
   await sendNotification(message, employee, settings, "report");
+}
+
+export async function notifySpecialRequestCreated(
+  employee: Employee,
+  title: string,
+  details: string,
+  settings: WasenderSettings
+): Promise<void> {
+  const now = getPakistanTime();
+
+  const message = `📨 *NEW SPECIAL REQUEST*
+
+👤 Employee: ${employee.fullName}
+🏢 Department: ${employee.department}
+🕐 Submitted at: ${formatTime(now)}
+
+📌 *Title:* ${title}
+📝 *Details:* 
+${details.substring(0, 300)}${details.length > 300 ? '...' : ''}
+
+👉 Please review this request in the admin portal.`;
+
+  await sendNotification(message, employee, settings, "request");
 }
 
 // --- NEW FUNCTION FOR SCHEDULER REMINDER ---
@@ -271,7 +337,7 @@ export async function notifyShiftReportReminder(
     fullName: user.fullName,
     phone: user.phone,
     whatsappPreference: user.whatsappPreference,
-    department: "N/A" // Not needed for reminder
+    department: "N/A" // Department is not critical for a personal reminder
   };
 
   const message = `⚠️ *Action Required: Shift Reminder*
@@ -282,6 +348,34 @@ ${messageBody}
 
 👉 Please log in to your dashboard to submit your report and end your shift.`;
 
-  // Send as "reminder" type (usually goes to individual only)
+  // Send as "reminder" type (usually goes to individual only, not to a group)
   await sendNotification(message, employee, settings, "reminder");
+}
+
+export async function sendTestMessage(settings: WasenderSettings): Promise<{ success: boolean; message: string }> {
+  if (!settings.apiToken) {
+    return { success: false, message: "API Token is missing" };
+  }
+
+  // Find a target to send to (prioritize groups)
+  let target = settings.groups?.requests || settings.groups?.shiftReports || settings.groups?.trackingAlerts;
+
+  if (!target) {
+    return { success: false, message: "No WhatsApp groups configured to test with." };
+  }
+
+  const message = `🔔 *GAC Trackings System Test*
+
+✅ Connection successful!
+This message confirms that your WhatsApp integration is working correctly.
+
+timestamp: ${new Date().toISOString()}`;
+
+  const sent = await sendToTarget(target, message, settings.apiToken);
+
+  if (sent) {
+    return { success: true, message: `Test message sent to group ${target}` };
+  } else {
+    return { success: false, message: "Failed to send message via WASENDER API" };
+  }
 }

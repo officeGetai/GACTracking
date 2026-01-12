@@ -310,7 +310,8 @@ const BreakTypeCard = ({
 // === MAIN DASHBOARD COMPONENT ===
 export default function EmployeeDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<"morning" | "evening">("morning");
+  const currentHour = new Date().getHours();
+  const [activeTab, setActiveTab] = useState<"morning" | "evening">(currentHour >= 15 ? "evening" : "morning");
   const [selectedBreakType, setSelectedBreakType] = useState<string>("");
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportContent, setReportContent] = useState("");
@@ -351,7 +352,7 @@ export default function EmployeeDashboard() {
         isEveningUnlocked: true,
         isMorningLocked: false,
         isEveningLocked: false,
-        morningMessage: "",
+        morningMessage: "Open Shift - Start anytime",
         eveningMessage: "",
         morningLockReason: null as "not_started" | "ended" | null,
         eveningLockReason: null as "not_started" | "ended" | null,
@@ -395,12 +396,21 @@ export default function EmployeeDashboard() {
     let morningLockReason: "not_started" | "ended" | null = null;
     let eveningLockReason: "not_started" | "ended" | null = null;
 
+    // Helper to subtract hours
+    const subHours = (date: Date, hours: number) => {
+      const d = new Date(date);
+      d.setHours(d.getHours() - hours);
+      return d;
+    };
+
     // Morning shift logic
-    if (morningStart && now < morningStart) {
+    const morningUnlockTime = morningStart ? subHours(morningStart, 2) : null;
+
+    if (morningStart && morningUnlockTime && now < morningUnlockTime) {
       isMorningLocked = true;
       morningLockReason = "not_started";
-      morningMessage = `Unlocks at ${format(morningStart, "hh:mm a")}`;
-    } else if (morningStart && morningEnd && now >= morningStart && now < morningEnd) {
+      morningMessage = `Unlocks at ${format(morningUnlockTime, "hh:mm a")} (2h before start)`;
+    } else if (morningStart && morningEnd && morningUnlockTime && now >= morningUnlockTime && now < morningEnd) {
       isMorningUnlocked = true;
     } else if (morningEnd && now >= morningEnd) {
       if (shift?.morningClockIn && !shift?.morningClockOut) {
@@ -414,11 +424,13 @@ export default function EmployeeDashboard() {
     }
 
     // Evening shift logic
-    if (eveningStart && now < eveningStart) {
+    const eveningUnlockTime = eveningStart ? subHours(eveningStart, 2) : null;
+
+    if (eveningStart && eveningUnlockTime && now < eveningUnlockTime) {
       isEveningLocked = true;
       eveningLockReason = "not_started";
-      eveningMessage = `Unlocks at ${format(eveningStart, "hh:mm a")}`;
-    } else if (eveningStart && eveningEnd && now >= eveningStart && now < eveningEnd) {
+      eveningMessage = `Unlocks at ${format(eveningUnlockTime, "hh:mm a")} (2h before start)`;
+    } else if (eveningStart && eveningEnd && eveningUnlockTime && now >= eveningUnlockTime && now < eveningEnd) {
       isEveningUnlocked = true;
     } else if (eveningEnd && now >= eveningEnd) {
       if (shift?.eveningClockIn && !shift?.eveningClockOut) {
@@ -711,6 +723,7 @@ export default function EmployeeDashboard() {
       loomVideos: loomLinks.trim() ? JSON.stringify([loomLinks.trim()]) : null,
       notes: notes.trim() || null,
       references: references.trim() ? JSON.stringify([references.trim()]) : null,
+      shiftType: activeTab,
       date: format(new Date(), "yyyy-MM-dd"),
       month: format(new Date(), "yyyy-MM")
     };
@@ -775,31 +788,31 @@ export default function EmployeeDashboard() {
               </span>
             </div>
 
-            {/* Shift Tabs */}
-            <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/50">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => !isMorningLocked && setActiveTab("morning")}
-                    disabled={isMorningLocked}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative",
-                      activeTab === "morning"
-                        ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm"
-                        : "text-slate-500 hover:text-slate-700",
-                      isMorningLocked && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    {isMorningLocked ? <Lock className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-                    {isOpenShiftUser ? "Shift" : "Morning"}
-                  </button>
-                </TooltipTrigger>
-                {morningMessage && (
-                  <TooltipContent><p>{morningMessage}</p></TooltipContent>
-                )}
-              </Tooltip>
+            {/* Shift Tabs - Only visible for Two Shift users */}
+            {isTwoShiftUser && (
+              <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/50">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => !isMorningLocked && setActiveTab("morning")}
+                      disabled={isMorningLocked}
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all relative",
+                        activeTab === "morning"
+                          ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-700",
+                        isMorningLocked && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      {isMorningLocked ? <Lock className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                      Morning
+                    </button>
+                  </TooltipTrigger>
+                  {morningMessage && (
+                    <TooltipContent><p>{morningMessage}</p></TooltipContent>
+                  )}
+                </Tooltip>
 
-              {!isOpenShiftUser && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -821,8 +834,8 @@ export default function EmployeeDashboard() {
                     <TooltipContent><p>{eveningMessage}</p></TooltipContent>
                   )}
                 </Tooltip>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -908,7 +921,7 @@ export default function EmployeeDashboard() {
 
                   <div className="flex flex-col items-center gap-4">
                     {/* Start Button */}
-                    {!isStarted && (
+                    {(!isStarted || (isEnded && isOpenShiftUser)) && (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button

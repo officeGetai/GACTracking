@@ -11,7 +11,7 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
     const config = await storage.getWasenderConfig();
     return {
         apiToken: config?.apiToken || null,
-        groupId: config?.groupId || null,
+        groups: config?.groups || undefined,
         isActive: config?.isActive || false,
     };
 }
@@ -120,7 +120,16 @@ async function checkAndAutoCloseShifts() {
                             userId: user.id,
                             action: "report_reminder_sent",
                             details: `Sent WhatsApp reminder: ${reminderMessage}`,
-                            timestamp: now
+                            timestamp: now,
+                            metadata: user.shiftType === "open"
+                                ? {
+                                    shiftType: "Open",
+                                    requiredHours: user.openShiftRequiredHours
+                                }
+                                : {
+                                    shiftType: user.shiftType === "morning" ? "Morning" : "Evening",
+                                    shiftEnd: user.shiftType === "morning" ? user.morningShiftEnd : user.eveningShiftEnd
+                                }
                         });
                     } catch (err) {
                         console.error(`[ShiftScheduler] Failed to send reminder to ${user.username}:`, err);
