@@ -1324,27 +1324,29 @@ export async function registerRoutes(
         const scheduledStartStr = getScheduledStartTime(user, 'morning');
 
         if (scheduledStartStr) {
-          // Parse scheduled start time 
-          // scheduledStartStr is "HH:MM" or "HH:MM:SS"
-          const [h, m] = scheduledStartStr.split(':').map(Number);
-
-          const scheduledStart = new Date(now);
-          scheduledStart.setHours(h, m, 0, 0);
-
-          // Calculate 2 hours before start
+          // Use Pakistan timezone for date calculation
+          const pktDateStr = getDateInPakistan(now);
+          const currentHourPKT = getHourInPakistan(now);
+          const [schedHour] = scheduledStartStr.split(':').map(Number);
+          
+          // Determine the correct date for the scheduled start:
+          // If current time is in late evening (20-24) and shift starts in early morning (0-6),
+          // the shift is for TOMORROW, use today's date for comparison
+          // If current time is in early morning (0-6) and shift starts in early morning (0-6),
+          // but later than current time, check if we're within the 2-hour window from yesterday's perspective
+          let scheduledDateStr = pktDateStr;
+          if (currentHourPKT >= 20 && schedHour < 6) {
+            // Current time is late evening, shift is early morning tomorrow
+            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            scheduledDateStr = getDateInPakistan(tomorrow);
+          }
+          
+          // Create scheduled start time in Pakistan timezone
+          const scheduledStart = parseUserTime(scheduledDateStr, scheduledStartStr);
           const earliestStart = subHours(scheduledStart, 2);
 
           // If current time is BEFORE the earliest allowed start time
           if (now < earliestStart) {
-            // Edge case: If scheduled start is e.g. 1 AM, earliest is 11 PM previous day.
-            // But we are comparing with 'now' which likely matches the date.
-            // We need to be careful with date boundaries if shifts cross midnight.
-            // For simplicity, assuming shift starts on the same day as 'now' mostly.
-
-            // Check if earliestStart is actually for TOMORROW vs today? 
-            // Logic: If I try to clock in at 8am for a 10am shift, now (8am) < earliest (8am) is false.
-            // If I try at 7am, now (7am) < 8am is true -> Block.
-
             return res.status(400).json({
               error: `You cannot start the shift yet. Clock-in is allowed from ${format(earliestStart, 'hh:mm a')} (2 hours before shift)`
             });
@@ -1594,8 +1596,23 @@ export async function registerRoutes(
       if (!isOpenShift) {
         const scheduledStartStr = getScheduledStartTime(user, 'evening');
         if (scheduledStartStr) {
-          const todayString = now.toISOString().split('T')[0];
-          const scheduledStart = new Date(`${todayString}T${scheduledStartStr}`);
+          // Use Pakistan timezone for date calculation
+          const pktDateStr = getDateInPakistan(now);
+          const currentHourPKT = getHourInPakistan(now);
+          const [schedHour] = scheduledStartStr.split(':').map(Number);
+          
+          // Determine the correct date for the scheduled start:
+          // If current time is in early morning (0-6 AM) and shift starts in evening (18-24),
+          // the shift started YESTERDAY, not today
+          let scheduledDateStr = pktDateStr;
+          if (currentHourPKT < 6 && schedHour >= 18) {
+            // Shift started yesterday - subtract one day
+            const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            scheduledDateStr = getDateInPakistan(yesterday);
+          }
+          
+          // Create scheduled start time in Pakistan timezone
+          const scheduledStart = parseUserTime(scheduledDateStr, scheduledStartStr);
           const earliestStart = subHours(scheduledStart, 2);
 
           if (now < earliestStart) {
