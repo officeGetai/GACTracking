@@ -141,6 +141,126 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import type { SafeUser, TargetItem, Target as TargetType } from "@shared/schema";
 
+// === TARGET SETTING DIALOG ===
+interface TargetDialogState {
+  open: boolean;
+  employee: SafeUser | null;
+  currentTarget: TargetType | null;
+}
+
+function SetTargetDialog({
+  state,
+  onClose,
+  onSave,
+  selectedMonth,
+  isSaving,
+}: {
+  state: TargetDialogState;
+  onClose: () => void;
+  onSave: (data: { userId: string; month: string; meetingTarget: number; orderTarget: number }) => void;
+  selectedMonth: string;
+  isSaving: boolean;
+}) {
+  const [meetingTarget, setMeetingTarget] = useState(20);
+  const [orderTarget, setOrderTarget] = useState(5);
+
+  React.useEffect(() => {
+    if (state.open) {
+      setMeetingTarget(state.currentTarget?.meetingTarget || 20);
+      setOrderTarget(state.currentTarget?.orderTarget || 5);
+    }
+  }, [state.open, state.currentTarget, state.employee?.id]);
+
+  const handleSave = () => {
+    if (!state.employee) return;
+    onSave({
+      userId: state.employee.id,
+      month: selectedMonth,
+      meetingTarget,
+      orderTarget,
+    });
+  };
+
+  const employeeName = state.employee ? `${state.employee.firstName} ${state.employee.lastName}` : "";
+
+  return (
+    <Dialog open={state.open} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Target className="w-5 h-5 text-blue-600" />
+            Set Monthly Targets
+          </DialogTitle>
+          <DialogDescription>
+            Set meeting and order targets for <strong>{employeeName}</strong> for {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-4">
+          <div className="space-y-3">
+            <Label htmlFor="meeting-target" className="flex items-center gap-2 text-sm font-medium">
+              <TrendingUp className="w-4 h-4 text-blue-500" />
+              Meeting Target
+            </Label>
+            <div className="flex items-center gap-3">
+              <Input
+                id="meeting-target"
+                type="number"
+                min={0}
+                max={100}
+                value={meetingTarget}
+                onChange={(e) => setMeetingTarget(parseInt(e.target.value) || 0)}
+                className="w-24 text-center font-semibold"
+                data-testid="input-meeting-target"
+              />
+              <span className="text-sm text-slate-500">meetings per month</span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <Label htmlFor="order-target" className="flex items-center gap-2 text-sm font-medium">
+              <DollarSign className="w-4 h-4 text-emerald-500" />
+              Order Target
+            </Label>
+            <div className="flex items-center gap-3">
+              <Input
+                id="order-target"
+                type="number"
+                min={0}
+                max={100}
+                value={orderTarget}
+                onChange={(e) => setOrderTarget(parseInt(e.target.value) || 0)}
+                className="w-24 text-center font-semibold"
+                data-testid="input-order-target"
+              />
+              <span className="text-sm text-slate-500">orders per month</span>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isSaving} data-testid="button-cancel-target">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving} data-testid="button-save-target">
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4 mr-2" />
+                Save Targets
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // === TYPES ===
 interface EmployeeTargetData {
   employee: SafeUser;
@@ -760,6 +880,7 @@ function BDEmployeeRow({
   onToggle,
   onVerify,
   onReject,
+  onSetTarget,
   verifyingId,
   filters,
 }: {
@@ -768,6 +889,7 @@ function BDEmployeeRow({
   onToggle: () => void;
   onVerify: (itemId: string) => void;
   onReject: (itemId: string) => void;
+  onSetTarget: () => void;
   verifyingId: string | null;
   filters: FilterState;
 }) {
@@ -879,6 +1001,25 @@ function BDEmployeeRow({
             {performanceScore}%
           </div>
         </div>
+
+        {/* Set Target Button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetTarget();
+              }}
+              data-testid={`button-set-target-${employee.id}`}
+            >
+              <Target className="w-4 h-4 text-blue-600" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Set Monthly Targets</TooltipContent>
+        </Tooltip>
 
         {/* Expand Icon */}
         <ChevronRight className={cn(
@@ -1146,6 +1287,11 @@ export default function AdminTargetBoard() {
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [activeDepartment, setActiveDepartment] = useState<"bd" | "dev">("bd");
+  const [targetDialog, setTargetDialog] = useState<TargetDialogState>({
+    open: false,
+    employee: null,
+    currentTarget: null,
+  });
   const [filters, setFilters] = useState<FilterState>({
     types: [],
     statuses: [],
@@ -1234,6 +1380,25 @@ export default function AdminTargetBoard() {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const setTargetMutation = useMutation({
+    mutationFn: async (data: { userId: string; month: string; meetingTarget: number; orderTarget: number }) => {
+      const res = await apiRequest("POST", "/api/admin/targets", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/targets/summary"] });
+      toast({ title: "Targets Updated", description: "Monthly targets have been saved successfully." });
+      setTargetDialog({ open: false, employee: null, currentTarget: null });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const openTargetDialog = (employee: SafeUser, target: TargetType | null) => {
+    setTargetDialog({ open: true, employee, currentTarget: target });
+  };
 
   const handleVerify = async (itemId: string) => {
     setVerifyingId(itemId);
@@ -1466,6 +1631,7 @@ export default function AdminTargetBoard() {
                       onToggle={() => toggleEmployee(empData.employee.id)}
                       onVerify={handleVerify}
                       onReject={handleReject}
+                      onSetTarget={() => openTargetDialog(empData.employee, empData.target)}
                       verifyingId={verifyingId}
                       filters={filters}
                     />
@@ -1519,6 +1685,15 @@ export default function AdminTargetBoard() {
           </div>
         </div>
       </div>
+
+      {/* Set Target Dialog */}
+      <SetTargetDialog
+        state={targetDialog}
+        onClose={() => setTargetDialog({ open: false, employee: null, currentTarget: null })}
+        onSave={(data) => setTargetMutation.mutate(data)}
+        selectedMonth={selectedMonth}
+        isSaving={setTargetMutation.isPending}
+      />
     </TooltipProvider>
   );
 }
