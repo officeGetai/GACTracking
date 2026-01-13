@@ -126,13 +126,21 @@ async function sendToTarget(target: string, text: string, token: string): Promis
 
 /**
  * Main function to handle notification logic based on preferences and notification type
+ * 
+ * PERSONAL DM RULES (as of Jan 2026):
+ * - Personal DMs ONLY send ENDING messages based on preference
+ * - "shift_reports_only" → Only shift END reports in DMs
+ * - "breaks_only" → Only break END messages in DMs
+ * - "both" (or "all") → Both shift END and break END in DMs
+ * - NO START alerts are sent to personal DMs for any preference
+ * - Group notifications remain unchanged (all alerts go to groups)
  */
 async function sendNotification(
   message: string,
   employee: Employee,
   settings: WasenderSettings,
-  // Added "request" and "alert" for future use; "report" is already in use.
-  notificationType: "shift" | "break" | "report" | "reminder" | "request" | "alert"
+  notificationType: "shift" | "break" | "report" | "reminder" | "request" | "alert",
+  isEndingNotification: boolean = false // NEW: Flag to indicate if this is an ending notification
 ): Promise<void> {
   // Skip if not configured or not active
   if (!settings.apiToken || !settings.isActive) {
@@ -160,23 +168,45 @@ async function sendNotification(
   }
 
   // 1. Determine if we should send to Group
-  // Only send to group if a group ID is configured for this type and it's not a personal reminder.
+  // Groups receive ALL notifications (start and end) - unchanged behavior
   if (groupToSendTo && groupToSendTo.trim() !== "" && notificationType !== "reminder") {
     targets.push(groupToSendTo);
   }
 
-  // 2. Determine if we should send to Individual
-  // Check if employee has a phone number and their preference allows this notification type
+  // 2. Determine if we should send to Individual (Personal DM)
+  // NEW LOGIC: Personal DMs ONLY receive ENDING messages based on preference
   let shouldSendToIndividual = false;
 
   if (employee.phone && employee.phone.trim() !== "") {
     if (notificationType === "reminder") {
-      shouldSendToIndividual = true; // Always send reminders to individual if phone exists
+      // Always send reminders to individual if phone exists
+      shouldSendToIndividual = true;
+    } else if (!isEndingNotification) {
+      // START notifications are NEVER sent to personal DMs
+      shouldSendToIndividual = false;
+      console.log(`[Personal DM] Skipping START notification for ${employee.fullName} - only END messages go to personal DMs`);
     } else {
-      shouldSendToIndividual =
-        preference === "both" ||
-        (preference === "shift_reports_only" && (notificationType === "report" || notificationType === "shift")) ||
-        (preference === "breaks_only" && notificationType === "break");
+      // This is an ENDING notification - check preference
+      switch (preference) {
+        case "shift_reports_only":
+          // Only shift END reports (notificationType "report")
+          shouldSendToIndividual = (notificationType === "report");
+          break;
+        case "breaks_only":
+          // Only break END messages (notificationType "break" AND isEndingNotification)
+          shouldSendToIndividual = (notificationType === "break");
+          break;
+        case "both":
+        case "all":
+        default:
+          // Both shift END and break END
+          shouldSendToIndividual = (notificationType === "report" || notificationType === "break");
+          break;
+      }
+      
+      if (!shouldSendToIndividual) {
+        console.log(`[Personal DM] Skipping ${notificationType} END for ${employee.fullName} - preference is "${preference}"`);
+      }
     }
   }
 
@@ -189,7 +219,7 @@ async function sendNotification(
     return;
   }
 
-  console.log(`Sending WhatsApp notification (${notificationType}) to ${targets.length} targets: ${targets.join(', ')}...`);
+  console.log(`Sending WhatsApp notification (${notificationType}, isEnding=${isEndingNotification}) to ${targets.length} targets: ${targets.join(', ')}...`);
 
   // Send to all targets sequentially with delay to avoid rate limits
   let successCount = 0;
@@ -229,7 +259,8 @@ export async function notifyShiftStart(employee: Employee, settings: WasenderSet
 
 ✅ Employee has checked in successfully.`;
 
-  await sendNotification(message, employee, settings, "shift");
+  // START notification - isEndingNotification = false (goes to group only, not personal DMs)
+  await sendNotification(message, employee, settings, "shift", false);
 }
 
 export async function notifyShiftEnd(
@@ -266,7 +297,8 @@ export async function notifyShiftEnd(
 
 ✅ Employee has checked out successfully.`;
 
-  await sendNotification(message, employee, settings, "report");
+  // END notification - isEndingNotification = true (goes to personal DMs based on preference)
+  await sendNotification(message, employee, settings, "report", true);
 }
 
 export async function notifyBreakStart(employee: Employee, breakType: string, settings: WasenderSettings): Promise<void> {
@@ -285,7 +317,8 @@ export async function notifyBreakStart(employee: Employee, breakType: string, se
 
 ⏸️ Employee is now on break.`;
 
-  await sendNotification(message, employee, settings, "break");
+  // START notification - isEndingNotification = false (goes to group only, not personal DMs)
+  await sendNotification(message, employee, settings, "break", false);
 }
 
 export async function notifyBreakEnd(
@@ -306,7 +339,8 @@ export async function notifyBreakEnd(
 
 ▶️ Employee has resumed work.`;
 
-  await sendNotification(message, employee, settings, "break");
+  // END notification - isEndingNotification = true (goes to personal DMs based on preference)
+  await sendNotification(message, employee, settings, "break", true);
 }
 
 export async function notifyBreakExceeded(
@@ -326,8 +360,8 @@ export async function notifyBreakExceeded(
 
 👉 Please return to work immediately.`;
 
-  // Send as "alert"
-  await sendNotification(message, employee, settings, "alert");
+  // ALERT notification - isEndingNotification = false (goes to group only)
+  await sendNotification(message, employee, settings, "alert", false);
 }
 
 export async function notifyDailyReportSubmitted(
@@ -355,8 +389,8 @@ ${workDetails.substring(0, 200)}${workDetails.length > 200 ? '...' : ''}
 
 ✅ Report submitted successfully.`;
 
-  // Shift reports go to 'shiftReports' group
-  await sendNotification(message, employee, settings, "report");
+  // Report submission - isEndingNotification = true (goes to personal DMs based on preference)
+  await sendNotification(message, employee, settings, "report", true);
 }
 
 export async function notifySpecialRequestCreated(
@@ -379,7 +413,8 @@ ${details.substring(0, 300)}${details.length > 300 ? '...' : ''}
 
 👉 Please review this request in the admin portal.`;
 
-  await sendNotification(message, employee, settings, "request");
+  // Request creation - isEndingNotification = false (goes to group only)
+  await sendNotification(message, employee, settings, "request", false);
 }
 
 // --- NEW FUNCTION FOR SCHEDULER REMINDER ---
@@ -445,7 +480,8 @@ export async function notifyShiftOvertime(
 ) {
   const message = `🚨 *SHIFT OVERTIME ALERT* 🚨\n\nHello ${employee.fullName},\n\nYou have been clocked in for ${Math.floor(lateMinutes / 60)}h ${lateMinutes % 60}m beyond your scheduled shift end time.\n\nPlease clock out immediately. If you do not close your shift within 15 minutes, it will be *forcefully closed*.\n\n_System Auto-Alert_`;
 
-  await sendNotification(message, employee, settings, "alert");
+  // Overtime ALERT - isEndingNotification = false (goes to group, but reminder type goes to individual)
+  await sendNotification(message, employee, settings, "alert", false);
 }
 
 // Notify Shift Auto-Closed (Force)
@@ -455,5 +491,6 @@ export async function notifyAutoClosed(
 ) {
   const message = `🛑 *SHIFT AUTO-CLOSED* 🛑\n\nHello ${employee.fullName},\n\nYour shift has been forcefully closed by the system due to extended inactivity (2h 15m overtime).\n\nPlease contact your manager if this was an error.\n\n_System Auto-Action_`;
 
-  await sendNotification(message, employee, settings, "alert");
+  // Auto-close is an important alert - send as ending notification so it reaches individual based on preference
+  await sendNotification(message, employee, settings, "alert", true);
 }
