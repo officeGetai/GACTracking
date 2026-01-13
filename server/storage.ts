@@ -144,7 +144,7 @@ export interface IStorage {
   }>;
   getAllMonitorableBreaks(): Promise<(Break & { user: SafeUser })[]>; // New method for scheduler
   getShiftsForOvertimeCheck(): Promise<(Shift & { user: SafeUser })[]>;
-  forceCloseActiveShiftsAndBreaks(): Promise<void>;
+  forceCloseActiveShiftsAndBreaks(): Promise<number>;
 
 
   // Target methods (Existing - likely for individual performance)
@@ -2123,55 +2123,65 @@ export class DatabaseStorage implements IStorage {
     return activeShifts;
   }
 
-  async forceCloseActiveShiftsAndBreaks(): Promise<void> {
+  async forceCloseActiveShiftsAndBreaks(): Promise<number> {
     const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    // Get Pakistan time for date calculations (UTC+5)
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const pakistanTime = new Date(utcTime + (5 * 60 * 60000));
+    const todayPakistan = pakistanTime.toISOString().split('T')[0];
 
-    // 1. Force Close active shifts from YESTERDAY (or before)
-    // We don't want to close TODAY's shifts if they just started at 8:55 AM.
-    // So we limit to shifts where date < today OR (date = today but maybe logic is tricky).
-    // The requirement says "9am system should clear all of the previous data".
-    // Implies clearing anything from "yesterday".
+    console.log(`[9AM Cleanup] Today in Pakistan: ${todayPakistan}`);
 
-    // Update shifts where date < today
-    // Actually, `shifts.date` is a string YYYY-MM-DD.
-    // If we run at 9AM today (2025-01-13), we want to close anything from 2025-01-12 or older.
-
-    const todayStr = now.toISOString().split('T')[0];
+    // 1. Force Close active shifts from BEFORE TODAY (Pakistan time)
+    // Close shifts where date < today (Pakistan time)
+    // Mark them as "incomplete" status with auto-close note
 
     // Close Morning Shifts
-    await db.update(shifts)
-      .set({ morningClockOut: now })
+    const morningResult = await db.update(shifts)
+      .set({ 
+        morningClockOut: now,
+        status: "incomplete",
+        notes: sql`COALESCE(${shifts.notes}, '') || '\n[System] Auto-closed at 9 AM - Incomplete shift'`
+      })
       .where(
         and(
-          lt(shifts.date, todayStr),
+          lt(shifts.date, todayPakistan),
           isNotNull(shifts.morningClockIn),
           isNull(shifts.morningClockOut)
         )
-      );
+      )
+      .returning({ id: shifts.id });
 
     // Close Evening Shifts
-    await db.update(shifts)
-      .set({ eveningClockOut: now })
+    const eveningResult = await db.update(shifts)
+      .set({ 
+        eveningClockOut: now,
+        status: "incomplete",
+        notes: sql`COALESCE(${shifts.notes}, '') || '\n[System] Auto-closed at 9 AM - Incomplete shift'`
+      })
       .where(
         and(
-          lt(shifts.date, todayStr),
+          lt(shifts.date, todayPakistan),
           isNotNull(shifts.eveningClockIn),
           isNull(shifts.eveningClockOut)
         )
+      )
+      .returning({ id: shifts.id });
+
+    const shiftsClosed = morningResult.length + eveningResult.length;
+    console.log(`[9AM Cleanup] Closed ${morningResult.length} morning shifts, ${eveningResult.length} evening shifts`);
+
+    // 2. Force End all active breaks from previous days
+    const activeBreaks = await db.select().from(breaks)
+      .where(
+        and(
+          isNull(breaks.endTime),
+          lt(breaks.date, todayPakistan)
+        )
       );
 
-    // 2. Force End all active breaks
-    // We can just end ALL active breaks regardless of date, or restricts to older ones?
-    // User said "started breaks". Likely implies any dangling breaks.
-    // Safest is to end ALL active breaks found.
-
-    const activeBreaks = await db.select().from(breaks).where(isNull(breaks.endTime));
-
     for (const b of activeBreaks) {
-      // Calculate duration if possible, else 0
       const duration = Math.floor((now.getTime() - new Date(b.startTime).getTime()) / 60000);
 
       await db.update(breaks)
@@ -2181,6 +2191,10 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(breaks.id, b.id));
     }
+
+    console.log(`[9AM Cleanup] Closed ${activeBreaks.length} active breaks`);
+
+    return shiftsClosed + activeBreaks.length;
   }
 }
 

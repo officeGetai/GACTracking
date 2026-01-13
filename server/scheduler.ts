@@ -147,14 +147,24 @@ async function checkShiftOvertime() {
     }
 }
 
-async function runDailyCleanup() {
+// Helper to get Pakistan time (UTC+5)
+function getPakistanTime(): Date {
     const now = new Date();
-    // Run only at 09:00 AM
-    if (now.getHours() === 9 && now.getMinutes() === 0) {
-        console.log("Running 9 AM Daily Cleanup...");
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    return new Date(utcTime + (5 * 60 * 60000)); // UTC+5
+}
+
+async function runDailyCleanup() {
+    const pakistanTime = getPakistanTime();
+    const pakistanHour = pakistanTime.getHours();
+    const pakistanMinute = pakistanTime.getMinutes();
+    
+    // Run only at 09:00 AM Pakistan time (within a 2-minute window to avoid missing it)
+    if (pakistanHour === 9 && pakistanMinute <= 1) {
+        console.log(`Running 9 AM Daily Cleanup (Pakistan time: ${pakistanTime.toISOString()})...`);
         try {
-            await storage.forceCloseActiveShiftsAndBreaks();
-            console.log("Cleanup complete.");
+            const closedCount = await storage.forceCloseActiveShiftsAndBreaks();
+            console.log(`Cleanup complete. Closed ${closedCount} shifts/breaks.`);
         } catch (error) {
             console.error("Error during 9 AM cleanup:", error);
         }
