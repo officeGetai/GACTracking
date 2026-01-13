@@ -1,19 +1,33 @@
 // shared/schema.ts
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, serial, varchar, timestamp, boolean, date, integer, jsonb } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  serial,
+  varchar,
+  timestamp,
+  boolean,
+  date,
+  integer,
+  jsonb,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Departments table
 export const departments = pgTable("departments", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   name: text("name").notNull().unique(),
   whatsappGroupId: text("whatsapp_group_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   firstName: text("first_name").notNull(),
@@ -56,7 +70,9 @@ export const sessions = pgTable("session", {
 // BD TARGETS TABLE (Amounts changed to text for flexible precision)
 export const bdTargets = pgTable("bd_targets", {
   id: serial("id").primaryKey(),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   month: text("month").notNull(), // Format: "YYYY-MM"
   targetType: text("target_type").default("revenue"),
   targetAmount: text("target_amount").notNull(), // Changed from decimal to text
@@ -67,8 +83,12 @@ export const bdTargets = pgTable("bd_targets", {
 
 // Shifts table for daily clock in/out records (morning/evening shifts)
 export const shifts = pgTable("shifts", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   date: date("date").notNull(),
   // Scheduled date - the intended working date based on shift schedule (may differ from date for cross-midnight shifts)
   scheduledDate: date("scheduled_date"),
@@ -83,14 +103,20 @@ export const shifts = pgTable("shifts", {
   // Status
   status: text("status").notNull().default("not_started"), // 'not_started', 'present', 'absent', 'late', 'half_day'
   notes: text("notes"),
-  overtimeNotificationSent: boolean("overtime_notification_sent").default(false),
+  overtimeNotificationSent: boolean("overtime_notification_sent").default(
+    false,
+  ),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Breaks table for tracking employee breaks
 export const breaks = pgTable("breaks", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   shiftId: varchar("shift_id").references(() => shifts.id),
   date: date("date").notNull(),
   type: text("type").notNull(), // 'prayer', 'meal', 'urgent'
@@ -104,8 +130,12 @@ export const breaks = pgTable("breaks", {
 
 // Targets table for meetings and orders tracking
 export const targets = pgTable("targets", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   month: text("month").notNull(), // Format: 'YYYY-MM'
   meetingTarget: integer("meeting_target").default(0),
   orderTarget: integer("order_target").default(0),
@@ -114,9 +144,15 @@ export const targets = pgTable("targets", {
 
 // Target items (meetings and orders)
 export const targetItems = pgTable("target_items", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  targetId: varchar("target_id").notNull().references(() => targets.id),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  targetId: varchar("target_id")
+    .notNull()
+    .references(() => targets.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   type: text("type").notNull(), // 'meeting' or 'order'
   name: text("name").notNull(),
   source: text("source"), // 'Top Upwork', 'B2B', etc.
@@ -133,8 +169,12 @@ export const targetItems = pgTable("target_items", {
 
 // Activity logs for tracking all employee actions (ADDED metadata column)
 export const activityLogs = pgTable("activity_logs", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   action: text("action").notNull(), // 'clock_in', 'clock_out', 'break_start', 'break_end', etc.
   details: text("details"),
   metadata: jsonb("metadata"), // New metadata column
@@ -144,7 +184,9 @@ export const activityLogs = pgTable("activity_logs", {
 
 // WASENDER API configuration with three separate group IDs
 export const wasenderConfig = pgTable("wasender_config", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   instanceId: text("instance_id"),
   apiToken: text("api_token"),
   groupId: text("group_id"),
@@ -159,9 +201,15 @@ export const wasenderConfig = pgTable("wasender_config", {
 
 // Daily Shift Reports table
 export const dailyShiftReports = pgTable("daily_shift_reports", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  shiftId: varchar("shift_id").notNull().references(() => shifts.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
+  shiftId: varchar("shift_id")
+    .notNull()
+    .references(() => shifts.id),
   date: date("date").notNull(),
   workDetails: text("work_details").notNull(), // Main work description
   loomVideos: text("loom_videos"), // JSON array of video links
@@ -176,8 +224,12 @@ export const dailyShiftReports = pgTable("daily_shift_reports", {
 
 // Special Requests table
 export const specialRequests = pgTable("special_requests", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   title: text("title").notNull(),
   details: text("details").notNull(),
   status: text("status").notNull().default("sent_for_approval"), // 'sent_for_approval', 'approved', 'not_approved', 'revision', 'resolved'
@@ -189,9 +241,15 @@ export const specialRequests = pgTable("special_requests", {
 
 // Request Comments/Revisions table (conversation thread)
 export const requestComments = pgTable("request_comments", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  requestId: varchar("request_id").notNull().references(() => specialRequests.id),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id")
+    .notNull()
+    .references(() => specialRequests.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   comment: text("comment").notNull(),
   isAdminComment: boolean("is_admin_comment").notNull().default(false),
   statusChange: text("status_change"), // Status change if this comment changed the request status
@@ -200,7 +258,9 @@ export const requestComments = pgTable("request_comments", {
 
 // Monthly Archive table (tracks which months are archived)
 export const monthlyArchive = pgTable("monthly_archive", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   month: text("month").notNull().unique(), // Format: 'YYYY-MM'
   archivedDate: timestamp("archived_date").defaultNow(),
   totalReports: integer("total_reports").default(0),
@@ -270,35 +330,44 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
   }),
 }));
 
-export const dailyShiftReportsRelations = relations(dailyShiftReports, ({ one }) => ({
-  user: one(users, {
-    fields: [dailyShiftReports.userId],
-    references: [users.id],
+export const dailyShiftReportsRelations = relations(
+  dailyShiftReports,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [dailyShiftReports.userId],
+      references: [users.id],
+    }),
+    shift: one(shifts, {
+      fields: [dailyShiftReports.shiftId],
+      references: [shifts.id],
+    }),
   }),
-  shift: one(shifts, {
-    fields: [dailyShiftReports.shiftId],
-    references: [shifts.id],
-  }),
-}));
+);
 
-export const specialRequestsRelations = relations(specialRequests, ({ one, many }) => ({
-  user: one(users, {
-    fields: [specialRequests.userId],
-    references: [users.id],
+export const specialRequestsRelations = relations(
+  specialRequests,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [specialRequests.userId],
+      references: [users.id],
+    }),
+    comments: many(requestComments),
   }),
-  comments: many(requestComments),
-}));
+);
 
-export const requestCommentsRelations = relations(requestComments, ({ one }) => ({
-  request: one(specialRequests, {
-    fields: [requestComments.requestId],
-    references: [specialRequests.id],
+export const requestCommentsRelations = relations(
+  requestComments,
+  ({ one }) => ({
+    request: one(specialRequests, {
+      fields: [requestComments.requestId],
+      references: [specialRequests.id],
+    }),
+    user: one(users, {
+      fields: [requestComments.userId],
+      references: [users.id],
+    }),
   }),
-  user: one(users, {
-    fields: [requestComments.userId],
-    references: [users.id],
-  }),
-}));
+);
 
 export const bdTargetsRelations = relations(bdTargets, ({ one }) => ({
   user: one(users, {
@@ -344,30 +413,40 @@ export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
 });
 
 // Updated WasenderConfig schema for insert
-export const insertWasenderConfigSchema = createInsertSchema(wasenderConfig).omit({
+export const insertWasenderConfigSchema = createInsertSchema(
+  wasenderConfig,
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export const insertDailyShiftReportSchema = createInsertSchema(dailyShiftReports).omit({
+export const insertDailyShiftReportSchema = createInsertSchema(
+  dailyShiftReports,
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export const insertSpecialRequestSchema = createInsertSchema(specialRequests).omit({
+export const insertSpecialRequestSchema = createInsertSchema(
+  specialRequests,
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export const insertRequestCommentSchema = createInsertSchema(requestComments).omit({
+export const insertRequestCommentSchema = createInsertSchema(
+  requestComments,
+).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertMonthlyArchiveSchema = createInsertSchema(monthlyArchive).omit({
+export const insertMonthlyArchiveSchema = createInsertSchema(
+  monthlyArchive,
+).omit({
   id: true,
   createdAt: true,
 });
@@ -410,7 +489,9 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 export type InsertWasenderConfig = z.infer<typeof insertWasenderConfigSchema>;
 export type WasenderConfig = typeof wasenderConfig.$inferSelect;
 
-export type InsertDailyShiftReport = z.infer<typeof insertDailyShiftReportSchema>;
+export type InsertDailyShiftReport = z.infer<
+  typeof insertDailyShiftReportSchema
+>;
 export type DailyShiftReport = typeof dailyShiftReports.$inferSelect;
 
 export type InsertSpecialRequest = z.infer<typeof insertSpecialRequestSchema>;
@@ -448,7 +529,12 @@ export const DEPARTMENTS = [
 export const SHIFT_TYPES = ["one_shift", "two_shifts", "open"] as const;
 
 // WhatsApp preferences
-export const WHATSAPP_PREFERENCES = ["both", "breaks_only", "shift_reports_only", "none"] as const;
+export const WHATSAPP_PREFERENCES = [
+  "both",
+  "breaks_only",
+  "shift_reports_only",
+  "none",
+] as const;
 
 // Special Request statuses
 export const SPECIAL_REQUEST_STATUSES = [
@@ -461,10 +547,18 @@ export const SPECIAL_REQUEST_STATUSES = [
 
 // Business Development Sources
 export const BUSINESS_SOURCES = [
-  "FB Yousaf", "FB Abdullah", "FB Get Ai",
-  "Insta Yousaf", "Insta Getai",
-  "Linkedin Yousaf", "Linkedin Abdullah", "Linkedin Get Ai",
-  "Discovery", "Top Upwork", "New Upwork", "Fiver Top"
+  "FB Yousaf",
+  "FB Abdullah",
+  "FB Get Ai",
+  "Insta Yousaf",
+  "Insta Getai",
+  "Linkedin Yousaf",
+  "Linkedin Abdullah",
+  "Linkedin Get Ai",
+  "Discovery",
+  "Top Upwork",
+  "New Upwork",
+  "Fiver Top",
 ] as const;
 
 export const CLIENT_TYPES = ["B2B", "B2C"] as const;

@@ -744,6 +744,7 @@ export class DatabaseStorage implements IStorage {
         id: shifts.id,
         userId: shifts.userId,
         date: shifts.date,
+        scheduledDate: shifts.scheduledDate,
         morningClockIn: shifts.morningClockIn,
         morningClockOut: shifts.morningClockOut,
         morningLateMinutes: shifts.morningLateMinutes,
@@ -752,6 +753,7 @@ export class DatabaseStorage implements IStorage {
         eveningLateMinutes: shifts.eveningLateMinutes,
         status: shifts.status,
         notes: shifts.notes,
+        overtimeNotificationSent: shifts.overtimeNotificationSent,
         createdAt: shifts.createdAt,
         // Include full user object for configuration access
         user: users
@@ -802,15 +804,6 @@ export class DatabaseStorage implements IStorage {
     }));
 
     return breaksWithUsers;
-  }
-
-  async updateBreak(id: string, data: Partial<Break>): Promise<Break> {
-    const [updated] = await db
-      .update(breaks)
-      .set(data)
-      .where(eq(breaks.id, id))
-      .returning();
-    return updated;
   }
 
   async getBreaksByUserAndDate(userId: string, date: string): Promise<Break[]> {
@@ -2101,6 +2094,7 @@ export class DatabaseStorage implements IStorage {
         id: shifts.id,
         userId: shifts.userId,
         date: shifts.date,
+        scheduledDate: shifts.scheduledDate,
         morningClockIn: shifts.morningClockIn,
         morningClockOut: shifts.morningClockOut,
         morningLateMinutes: shifts.morningLateMinutes,
