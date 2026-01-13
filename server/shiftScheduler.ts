@@ -4,7 +4,7 @@ import { notifyShiftReportReminder, type WasenderSettings } from "./wasender";
 
 // Configuration
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
-const AUTO_CLOSE_DELAY_HOURS = 2; // Close 2 hours after shift end time
+const AUTO_CLOSE_DELAY_HOURS = 3; // Close 3 hours after shift end time
 
 // Helper to get WASENDER settings
 async function getWasenderSettings(): Promise<WasenderSettings> {
@@ -120,101 +120,7 @@ async function checkAndAutoCloseShifts() {
             if (!user) continue;
 
             // ============================================================
-            // 1. SHIFT REPORT WHATSAPP REMINDER LOGIC
-            // ============================================================
-
-            let shouldSendReminder = false;
-            let reminderMessage = "";
-
-            // A. CHECK OPEN SHIFT (Based on Required Hours)
-            if (user.shiftType === 'open') {
-                const clockIn = shift.morningClockIn || shift.eveningClockIn; // Open shift usually uses morning columns
-                if (clockIn) {
-                    const elapsedHours = (now.getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60);
-                    const requiredHours = parseFloat(user.openShiftRequiredHours || "8"); // Default to 8 if not set
-
-                    // If they have worked their required hours
-                    if (elapsedHours >= requiredHours) {
-                        shouldSendReminder = true;
-                        reminderMessage = `You have completed your required ${requiredHours} hours. Please submit your report and clock out.`;
-                    }
-                }
-            }
-            // B. CHECK FIXED SHIFTS (15 Minutes before End Time)
-            else {
-                let scheduledEndTime: string | null = null;
-                let scheduledStartTime: string | null = null;
-                let clockInTime: Date | null = null;
-
-                // Determine relevant end time based on which shift is active
-                if (shift.morningClockIn && !shift.morningClockOut) {
-                    scheduledEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
-                    scheduledStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
-                    clockInTime = new Date(shift.morningClockIn);
-                } else if (shift.eveningClockIn && !shift.eveningClockOut) {
-                    scheduledEndTime = user.eveningShiftEnd;
-                    scheduledStartTime = user.eveningShiftStart;
-                    clockInTime = new Date(shift.eveningClockIn);
-                }
-
-                if (scheduledEndTime && clockInTime) {
-                    // Use cross-midnight aware calculation with scheduledDate
-                    const endTime = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
-                    const minutesUntilEnd = (endTime.getTime() - now.getTime()) / (1000 * 60);
-
-                    // If we are within 15 minutes of the end (and not passed it significantly)
-                    if (minutesUntilEnd > 0 && minutesUntilEnd <= 15) {
-                        shouldSendReminder = true;
-                        reminderMessage = `Your shift ends in ${Math.ceil(minutesUntilEnd)} minutes. Please submit your report.`;
-                    }
-                }
-            }
-
-            // PERFORM REMINDER SEND (If condition met and not already sent)
-            if (shouldSendReminder && user.phone) {
-                // Check if we already sent a reminder today to avoid spamming every 5 mins
-                const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
-                const alreadyReminded = logs.some(log =>
-                    log.action === "report_reminder_sent" &&
-                    // Ensure it was sent recently (within last 12 hours) to apply to this specific shift
-                    (now.getTime() - new Date(log.timestamp).getTime()) < (12 * 60 * 60 * 1000)
-                );
-
-                if (!alreadyReminded) {
-                    console.log(`[ShiftScheduler] Sending report reminder to ${user.username}`);
-
-                    // Send WhatsApp
-                    try {
-                        await notifyShiftReportReminder({
-                            fullName: `${user.firstName} ${user.lastName}`,
-                            phone: user.phone,
-                            whatsappPreference: user.whatsappPreference
-                        }, reminderMessage, wasenderSettings);
-
-                        // Log it so we don't send again
-                        await storage.createActivityLog({
-                            userId: user.id,
-                            action: "report_reminder_sent",
-                            details: `Sent WhatsApp reminder: ${reminderMessage}`,
-                            timestamp: now,
-                            metadata: user.shiftType === "open"
-                                ? {
-                                    shiftType: "Open",
-                                    requiredHours: user.openShiftRequiredHours
-                                }
-                                : {
-                                    shiftType: user.shiftType === "morning" ? "Morning" : "Evening",
-                                    shiftEnd: user.shiftType === "morning" ? user.morningShiftEnd : user.eveningShiftEnd
-                                }
-                        });
-                    } catch (err) {
-                        console.error(`[ShiftScheduler] Failed to send reminder to ${user.username}:`, err);
-                    }
-                }
-            }
-
-            // ============================================================
-            // 2. AUTO-CLOSE WARNING (15 minutes before auto-close)
+            // 1. AUTO-CLOSE WARNING (15 minutes before auto-close)
             // ============================================================
 
             // Skip for Open Shifts
@@ -250,7 +156,7 @@ async function checkAndAutoCloseShifts() {
                         const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
                         const alreadyWarned = logs.some(log =>
                             log.action === "auto_close_warning_sent" &&
-                            (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000) // Within last 2 hours
+                            (now.getTime() - new Date(log.timestamp).getTime()) < (3 * 60 * 60 * 1000) // Within last 3 hours
                         );
 
                         if (!alreadyWarned) {
@@ -323,14 +229,14 @@ async function checkAndAutoCloseShifts() {
                         // 2. Set Morning Clock Out
                         await storage.updateShift(shift.id, {
                             morningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 2h after shift end"
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 3h after shift end"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Morning shift auto-closed (2h after configured end time: ${scheduledEndTime})`,
+                            details: `Morning shift auto-closed (3h after configured end time: ${scheduledEndTime})`,
                             timestamp: now
                         });
 
@@ -371,14 +277,14 @@ async function checkAndAutoCloseShifts() {
                         // 2. Set Evening Clock Out
                         await storage.updateShift(shift.id, {
                             eveningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 2h after shift end"
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 3h after shift end"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Evening shift auto-closed (2h after configured end time: ${scheduledEndTime})`,
+                            details: `Evening shift auto-closed (3h after configured end time: ${scheduledEndTime})`,
                             timestamp: now
                         });
 
