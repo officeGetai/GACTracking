@@ -830,15 +830,20 @@ export default function AttendancePage() {
   // Edit shift mutation
   const editShiftMutation = useMutation({
     mutationFn: async ({ shiftId, data }: { shiftId: string; data: any }) => {
+      console.log("[editShiftMutation] Sending PATCH to /api/admin/shifts/" + shiftId, data);
       const res = await apiRequest("PATCH", `/api/admin/shifts/${shiftId}`, data);
-      return res.json();
+      const result = await res.json();
+      console.log("[editShiftMutation] Response:", result);
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log("[editShiftMutation] Success:", data);
       toast({ title: "Success", description: "Shift record updated successfully" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/employee-shifts", selectedEmployeeId, selectedMonth] });
       setSelectedDayRecord(null);
     },
     onError: (error: any) => {
+      console.error("[editShiftMutation] Error:", error);
       toast({ 
         title: "Error", 
         description: error.message || "Failed to update shift record", 
