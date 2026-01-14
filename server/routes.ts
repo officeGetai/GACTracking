@@ -858,6 +858,9 @@ export async function registerRoutes(
   app.patch("/api/admin/shifts/:shiftId", requireAdmin, async (req, res) => {
     try {
       const { shiftId } = req.params;
+      console.log(`[Admin PATCH] Received request to update shift ${shiftId}`);
+      console.log(`[Admin PATCH] Request body:`, JSON.stringify(req.body));
+      
       const { 
         morningClockIn, 
         morningClockOut, 
@@ -872,8 +875,10 @@ export async function registerRoutes(
       // Get existing shift
       const shift = await storage.getShiftById(shiftId);
       if (!shift) {
+        console.log(`[Admin PATCH] Shift ${shiftId} not found`);
         return res.status(404).json({ error: "Shift not found" });
       }
+      console.log(`[Admin PATCH] Found shift:`, JSON.stringify(shift));
 
       // Build update object - only include fields that are explicitly provided
       const updates: any = {};
@@ -904,8 +909,11 @@ export async function registerRoutes(
         updates.notes = notes;
       }
 
+      console.log(`[Admin PATCH] Applying updates:`, JSON.stringify(updates));
+      
       // Update shift
       const updatedShift = await storage.updateShift(shiftId, updates);
+      console.log(`[Admin PATCH] Updated shift result:`, JSON.stringify(updatedShift));
 
       // Log admin action
       await storage.createActivityLog({
