@@ -70,29 +70,31 @@ function calculateShiftEndDateTime(
     // Start is in evening (>= 12:00) and end is earlier than start (in morning)
     if (startTimeStr && endMinutesTotal < startMinutesTotal && startHours >= 12) {
         endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000); // Add one day
-        return endDate;
+        // Don't return early - still apply the safeguard below
     }
     
     // For legacy shifts without scheduledDate, apply fallback logic
     if (!scheduledDate) {
-        // Fallback: if end time is more than 12 hours before clock-in, add a day
+        // Fallback: if end time is before clock-in, add a day
         if (endDate.getTime() < clockInTime.getTime()) {
-            const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
-            if (gapHours > 12) {
-                endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
-            }
+            endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
         }
     }
     
-    // Final safeguard: if computed end time is STILL before clock-in by more than 12 hours,
-    // something is wrong - adjust the end time forward
-    // This handles incorrectly populated scheduledDate values
-    if (endDate.getTime() < clockInTime.getTime()) {
-        const gapHours = (clockInTime.getTime() - endDate.getTime()) / (1000 * 60 * 60);
-        if (gapHours > 12) {
-            console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is ${gapHours.toFixed(1)}h before clock-in ${clockInTime.toISOString()}, adjusting forward`);
-            endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
-        }
+    // CRITICAL SAFEGUARD: End time must ALWAYS be after clock-in time
+    // A shift cannot end before it starts - if this happens, add a day
+    // This handles all edge cases including cross-midnight shifts with early morning start times
+    while (endDate.getTime() <= clockInTime.getTime()) {
+        console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is before/equal clock-in ${clockInTime.toISOString()}, adding a day`);
+        endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
+    }
+    
+    // Additional sanity check: end time should be within 24 hours of clock-in
+    // If gap is more than 24 hours, something is wrong
+    const gapHours = (endDate.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+    if (gapHours > 24) {
+        console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is ${gapHours.toFixed(1)}h after clock-in, capping to 24h`);
+        endDate = new Date(clockInTime.getTime() + 24 * 60 * 60 * 1000);
     }
     
     return endDate;
