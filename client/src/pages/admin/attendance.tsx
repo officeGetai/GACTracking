@@ -874,7 +874,10 @@ export default function AttendancePage() {
 
   // Handler functions for edit and delete
   const handleEditShift = (shiftId: string, data: any) => {
+    console.log("[handleEditShift] Called with shiftId:", shiftId, "data:", data);
+    console.log("[handleEditShift] Calling mutation.mutate now...");
     editShiftMutation.mutate({ shiftId, data });
+    console.log("[handleEditShift] Mutation.mutate called");
   };
 
   const handleDeleteShift = (shiftId: string) => {
