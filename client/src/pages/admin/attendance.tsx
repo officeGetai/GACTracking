@@ -1,6 +1,6 @@
 // client/src/pages/admin/attendance.tsx
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   format,
   startOfMonth,
@@ -48,9 +48,25 @@ import {
   FileText,
   ArrowRight,
   Minus,
+  Pencil,
+  Trash2,
+  Save,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -397,8 +413,48 @@ function DayCell({
   );
 }
 
+// Helper to extract time from datetime
+function extractTimeValue(datetime: string | null): string {
+  if (!datetime) return "";
+  try {
+    return format(new Date(datetime), "HH:mm");
+  } catch {
+    return "";
+  }
+}
+
 // Day Detail Panel
-function DayDetailPanel({ record }: { record: DayRecord | null }) {
+interface DayDetailPanelProps {
+  record: DayRecord | null;
+  onEdit?: (shiftId: string, data: any) => void;
+  onDelete?: (shiftId: string) => void;
+  isEditing?: boolean;
+  isSaving?: boolean;
+}
+
+function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDetailPanelProps) {
+  const [editMode, setEditMode] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editValues, setEditValues] = useState({
+    morningClockIn: "",
+    morningClockOut: "",
+    eveningClockIn: "",
+    eveningClockOut: "",
+  });
+
+  // Reset edit mode when record changes
+  useEffect(() => {
+    if (record?.shift) {
+      setEditValues({
+        morningClockIn: extractTimeValue(record.morningIn),
+        morningClockOut: extractTimeValue(record.morningOut),
+        eveningClockIn: extractTimeValue(record.eveningIn),
+        eveningClockOut: extractTimeValue(record.eveningOut),
+      });
+    }
+    setEditMode(false);
+  }, [record?.dateStr]);
+
   if (!record || record.status === "weekend" || record.status === "future") {
     return (
       <div className="h-full flex items-center justify-center text-slate-400">
@@ -412,81 +468,243 @@ function DayDetailPanel({ record }: { record: DayRecord | null }) {
 
   const netWorkMinutes = record.workMinutes - record.breakMinutes;
 
+  const handleSave = () => {
+    if (!record.shift?.id || !onEdit) return;
+    
+    // Build update data - only include fields that have values
+    const updateData: any = {};
+    
+    // Helper to build full datetime from date + time
+    const buildDateTime = (timeStr: string) => {
+      if (!timeStr) return null;
+      const [hours, minutes] = timeStr.split(":").map(Number);
+      const date = new Date(record.date);
+      date.setHours(hours, minutes, 0, 0);
+      return date.toISOString();
+    };
+
+    if (editValues.morningClockIn) {
+      updateData.morningClockIn = buildDateTime(editValues.morningClockIn);
+    } else if (record.morningIn && !editValues.morningClockIn) {
+      updateData.morningClockIn = null;
+    }
+
+    if (editValues.morningClockOut) {
+      updateData.morningClockOut = buildDateTime(editValues.morningClockOut);
+    } else if (record.morningOut && !editValues.morningClockOut) {
+      updateData.morningClockOut = null;
+    }
+
+    if (editValues.eveningClockIn) {
+      updateData.eveningClockIn = buildDateTime(editValues.eveningClockIn);
+    } else if (record.eveningIn && !editValues.eveningClockIn) {
+      updateData.eveningClockIn = null;
+    }
+
+    if (editValues.eveningClockOut) {
+      updateData.eveningClockOut = buildDateTime(editValues.eveningClockOut);
+    } else if (record.eveningOut && !editValues.eveningClockOut) {
+      updateData.eveningClockOut = null;
+    }
+
+    onEdit(record.shift.id, updateData);
+    setEditMode(false);
+  };
+
+  const handleDelete = () => {
+    if (!record.shift?.id || !onDelete) return;
+    onDelete(record.shift.id);
+    setShowDeleteConfirm(false);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h4 className="font-bold text-slate-900 dark:text-white">
           {format(record.date, "EEEE, MMMM d")}
         </h4>
-        <Badge className={cn(
-          record.status === "present" && "bg-emerald-500",
-          record.status === "late" && "bg-orange-500",
-          record.status === "absent" && "bg-red-500",
-        )}>
-          {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge className={cn(
+            record.status === "present" && "bg-emerald-500",
+            record.status === "late" && "bg-orange-500",
+            record.status === "absent" && "bg-red-500",
+          )}>
+            {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+          </Badge>
+          {record.shift && onEdit && !editMode && (
+            <Button 
+              size="icon" 
+              variant="ghost" 
+              className="h-7 w-7"
+              onClick={() => setEditMode(true)}
+              data-testid="button-edit-shift"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {record.shift && onDelete && !editMode && (
+            <Button 
+              size="icon" 
+              variant="ghost" 
+              className="h-7 w-7 text-red-500 hover:text-red-600"
+              onClick={() => setShowDeleteConfirm(true)}
+              data-testid="button-delete-shift"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {record.status !== "absent" && (
         <>
-          {/* Morning Shift */}
-          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-            <div className="flex items-center gap-2 mb-2">
-              <Sun className="h-4 w-4 text-amber-600" />
-              <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Morning Shift</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2">
-                <LogIn className="h-3.5 w-3.5 text-emerald-500" />
-                <span className="text-slate-600 dark:text-slate-400">In:</span>
-                <span className="font-mono font-medium">{formatTime(record.morningIn)}</span>
+          {editMode ? (
+            <div className="space-y-4">
+              {/* Morning Shift Edit */}
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sun className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Morning Shift</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clock In</Label>
+                    <Input
+                      type="time"
+                      value={editValues.morningClockIn}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, morningClockIn: e.target.value }))}
+                      className="h-8"
+                      data-testid="input-morning-clock-in"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clock Out</Label>
+                    <Input
+                      type="time"
+                      value={editValues.morningClockOut}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, morningClockOut: e.target.value }))}
+                      className="h-8"
+                      data-testid="input-morning-clock-out"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <LogOut className="h-3.5 w-3.5 text-blue-500" />
-                <span className="text-slate-600 dark:text-slate-400">Out:</span>
-                <span className="font-mono font-medium">{formatTime(record.morningOut)}</span>
-              </div>
-            </div>
-          </div>
 
-          {/* Evening Shift */}
-          <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-            <div className="flex items-center gap-2 mb-2">
-              <Moon className="h-4 w-4 text-indigo-600" />
-              <span className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Evening Shift</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2">
-                <LogIn className="h-3.5 w-3.5 text-emerald-500" />
-                <span className="text-slate-600 dark:text-slate-400">In:</span>
-                <span className="font-mono font-medium">{formatTime(record.eveningIn)}</span>
+              {/* Evening Shift Edit */}
+              <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+                <div className="flex items-center gap-2 mb-3">
+                  <Moon className="h-4 w-4 text-indigo-600" />
+                  <span className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Evening Shift</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clock In</Label>
+                    <Input
+                      type="time"
+                      value={editValues.eveningClockIn}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, eveningClockIn: e.target.value }))}
+                      className="h-8"
+                      data-testid="input-evening-clock-in"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clock Out</Label>
+                    <Input
+                      type="time"
+                      value={editValues.eveningClockOut}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, eveningClockOut: e.target.value }))}
+                      className="h-8"
+                      data-testid="input-evening-clock-out"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <LogOut className="h-3.5 w-3.5 text-blue-500" />
-                <span className="text-slate-600 dark:text-slate-400">Out:</span>
-                <span className="font-mono font-medium">{formatTime(record.eveningOut)}</span>
-              </div>
-            </div>
-          </div>
 
-          {/* Summary */}
-          <div className="grid grid-cols-3 gap-2">
-            <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
-              <Timer className="h-4 w-4 mx-auto text-slate-500 mb-1" />
-              <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDuration(netWorkMinutes)}</p>
-              <p className="text-[10px] text-slate-500">Net Work</p>
+              {/* Edit Actions */}
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  data-testid="button-save-shift"
+                >
+                  <Save className="h-4 w-4 mr-1" />
+                  {isSaving ? "Saving..." : "Save Changes"}
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setEditMode(false)}
+                  disabled={isSaving}
+                  data-testid="button-cancel-edit"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Cancel
+                </Button>
+              </div>
             </div>
-            <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
-              <Coffee className="h-4 w-4 mx-auto text-amber-500 mb-1" />
-              <p className="text-sm font-bold text-slate-900 dark:text-white">{record.breakCount}</p>
-              <p className="text-[10px] text-slate-500">Breaks</p>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
-              <AlertTriangle className="h-4 w-4 mx-auto text-orange-500 mb-1" />
-              <p className="text-sm font-bold text-slate-900 dark:text-white">{record.lateMinutes}m</p>
-              <p className="text-[10px] text-slate-500">Late</p>
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* Morning Shift */}
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sun className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Morning Shift</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <LogIn className="h-3.5 w-3.5 text-emerald-500" />
+                    <span className="text-slate-600 dark:text-slate-400">In:</span>
+                    <span className="font-mono font-medium">{formatTime(record.morningIn)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <LogOut className="h-3.5 w-3.5 text-blue-500" />
+                    <span className="text-slate-600 dark:text-slate-400">Out:</span>
+                    <span className="font-mono font-medium">{formatTime(record.morningOut)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Evening Shift */}
+              <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+                <div className="flex items-center gap-2 mb-2">
+                  <Moon className="h-4 w-4 text-indigo-600" />
+                  <span className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Evening Shift</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <LogIn className="h-3.5 w-3.5 text-emerald-500" />
+                    <span className="text-slate-600 dark:text-slate-400">In:</span>
+                    <span className="font-mono font-medium">{formatTime(record.eveningIn)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <LogOut className="h-3.5 w-3.5 text-blue-500" />
+                    <span className="text-slate-600 dark:text-slate-400">Out:</span>
+                    <span className="font-mono font-medium">{formatTime(record.eveningOut)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
+                  <Timer className="h-4 w-4 mx-auto text-slate-500 mb-1" />
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDuration(netWorkMinutes)}</p>
+                  <p className="text-[10px] text-slate-500">Net Work</p>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
+                  <Coffee className="h-4 w-4 mx-auto text-amber-500 mb-1" />
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{record.breakCount}</p>
+                  <p className="text-[10px] text-slate-500">Breaks</p>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
+                  <AlertTriangle className="h-4 w-4 mx-auto text-orange-500 mb-1" />
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{record.lateMinutes}m</p>
+                  <p className="text-[10px] text-slate-500">Late</p>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -496,6 +714,29 @@ function DayDetailPanel({ record }: { record: DayRecord | null }) {
           <p className="text-sm text-red-700 dark:text-red-300">No attendance record for this day</p>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Shift Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this shift record for {format(record.date, "MMMM d, yyyy")}? 
+              This action cannot be undone and will remove all clock in/out times and associated data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDelete}
+              className="bg-red-500 hover:bg-red-600"
+              data-testid="button-confirm-delete"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -539,6 +780,7 @@ export default function AttendancePage() {
   const [selectedDayRecord, setSelectedDayRecord] = useState<DayRecord | null>(null);
 
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const monthOptions = getMonthOptions();
 
   // Parse selected month
@@ -602,6 +844,55 @@ export default function AttendancePage() {
     enabled: !!selectedEmployeeId,
     staleTime: 60000,
   });
+
+  // Edit shift mutation
+  const editShiftMutation = useMutation({
+    mutationFn: async ({ shiftId, data }: { shiftId: string; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/admin/shifts/${shiftId}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Success", description: "Shift record updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/employee-shifts", selectedEmployeeId, selectedMonth] });
+      setSelectedDayRecord(null);
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to update shift record", 
+        variant: "destructive" 
+      });
+    },
+  });
+
+  // Delete shift mutation
+  const deleteShiftMutation = useMutation({
+    mutationFn: async (shiftId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/shifts/${shiftId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Success", description: "Shift record deleted successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/employee-shifts", selectedEmployeeId, selectedMonth] });
+      setSelectedDayRecord(null);
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to delete shift record", 
+        variant: "destructive" 
+      });
+    },
+  });
+
+  // Handler functions for edit and delete
+  const handleEditShift = (shiftId: string, data: any) => {
+    editShiftMutation.mutate({ shiftId, data });
+  };
+
+  const handleDeleteShift = (shiftId: string) => {
+    deleteShiftMutation.mutate(shiftId);
+  };
 
   // Create shift map by date
   const shiftMap = useMemo(() => {
@@ -1048,7 +1339,12 @@ export default function AttendancePage() {
                   </h3>
                 </div>
                 <div className="flex-1 p-4 overflow-y-auto">
-                  <DayDetailPanel record={selectedDayRecord} />
+                  <DayDetailPanel 
+                    record={selectedDayRecord} 
+                    onEdit={handleEditShift}
+                    onDelete={handleDeleteShift}
+                    isSaving={editShiftMutation.isPending || deleteShiftMutation.isPending}
+                  />
                 </div>
               </div>
             </div>
