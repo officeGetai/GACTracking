@@ -471,42 +471,24 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
   const handleSave = () => {
     if (!record.shift?.id || !onEdit) return;
     
-    // Build update data - only include fields that have values
-    const updateData: any = {};
-    
     // Helper to build full datetime from date + time
     const buildDateTime = (timeStr: string) => {
-      if (!timeStr) return null;
+      if (!timeStr || timeStr.trim() === "") return null;
       const [hours, minutes] = timeStr.split(":").map(Number);
       const date = new Date(record.date);
       date.setHours(hours, minutes, 0, 0);
       return date.toISOString();
     };
 
-    if (editValues.morningClockIn) {
-      updateData.morningClockIn = buildDateTime(editValues.morningClockIn);
-    } else if (record.morningIn && !editValues.morningClockIn) {
-      updateData.morningClockIn = null;
-    }
+    // Always send all fields explicitly - null to clear, value to set
+    const updateData: any = {
+      morningClockIn: buildDateTime(editValues.morningClockIn),
+      morningClockOut: buildDateTime(editValues.morningClockOut),
+      eveningClockIn: buildDateTime(editValues.eveningClockIn),
+      eveningClockOut: buildDateTime(editValues.eveningClockOut),
+    };
 
-    if (editValues.morningClockOut) {
-      updateData.morningClockOut = buildDateTime(editValues.morningClockOut);
-    } else if (record.morningOut && !editValues.morningClockOut) {
-      updateData.morningClockOut = null;
-    }
-
-    if (editValues.eveningClockIn) {
-      updateData.eveningClockIn = buildDateTime(editValues.eveningClockIn);
-    } else if (record.eveningIn && !editValues.eveningClockIn) {
-      updateData.eveningClockIn = null;
-    }
-
-    if (editValues.eveningClockOut) {
-      updateData.eveningClockOut = buildDateTime(editValues.eveningClockOut);
-    } else if (record.eveningOut && !editValues.eveningClockOut) {
-      updateData.eveningClockOut = null;
-    }
-
+    console.log("Saving shift update:", record.shift.id, updateData);
     onEdit(record.shift.id, updateData);
     setEditMode(false);
   };
