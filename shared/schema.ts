@@ -234,6 +234,9 @@ export const specialRequests = pgTable("special_requests", {
   details: text("details").notNull(),
   status: text("status").notNull().default("sent_for_approval"), // 'sent_for_approval', 'approved', 'not_approved', 'revision', 'resolved'
   month: text("month").notNull(), // Format: 'YYYY-MM' for archiving
+  // New fields for enhanced request system
+  requestDates: jsonb("request_dates"), // JSON array of {date: string, shiftType: string}
+  adminResponse: text("admin_response"), // Admin's official response message
   archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
