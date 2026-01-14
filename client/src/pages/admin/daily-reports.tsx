@@ -24,6 +24,8 @@ import {
   TrendingUp,
   BarChart3,
   Loader2,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -52,8 +54,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 // Safe JSON parse helper
 function safeParseArray(value: any): string[] {
@@ -281,6 +284,41 @@ export default function AdminDailyReportsPage() {
   const [groupByDepartment, setGroupByDepartment] = useState(true);
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { toast } = useToast();
+
+  // Delete report function
+  const handleDeleteReport = async () => {
+    if (!selectedReport) return;
+    
+    setIsDeleting(true);
+    try {
+      const res = await apiRequest("DELETE", `/api/admin/reports/daily/${selectedReport.id}`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to delete report");
+      }
+      
+      toast({
+        title: "Report Deleted",
+        description: "The report has been successfully deleted.",
+      });
+      
+      setDeleteConfirmOpen(false);
+      setViewDialogOpen(false);
+      setSelectedReport(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/daily"] });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete report",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Fetch employees for filter dropdown
   const { data: employees = [] } = useQuery({
@@ -746,11 +784,71 @@ export default function AdminDailyReportsPage() {
                       <Clock className="h-3 w-3" />
                       Submitted {format(new Date(selectedReport.createdAt), "MMM d, yyyy 'at' h:mm a")}
                     </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                      data-testid="button-delete-report"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Delete
+                    </Button>
                   </div>
                 </div>
               </ScrollArea>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Report
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete this report? This action cannot be undone.
+            </p>
+            {selectedReport && (
+              <div className="mt-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 text-sm">
+                <p><strong>Employee:</strong> {selectedReport.user?.firstName} {selectedReport.user?.lastName}</p>
+                <p><strong>Date:</strong> {format(parseISO(selectedReport.date), "MMMM d, yyyy")}</p>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteReport}
+              disabled={isDeleting}
+              data-testid="button-confirm-delete-report"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Report
+                </>
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

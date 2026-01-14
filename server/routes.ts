@@ -2690,6 +2690,35 @@ export async function registerRoutes(
     }
   });
 
+  // Admin: Delete a daily report
+  app.delete("/api/admin/reports/daily/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Verify report exists
+      const report = await storage.getDailyShiftReport(id);
+      if (!report) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+
+      await storage.deleteDailyShiftReport(id);
+      
+      // Log the action
+      const adminId = req.session.userId!;
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "admin_delete_report",
+        details: `Deleted report for user ${report.userId} dated ${report.date}`,
+        timestamp: new Date()
+      });
+
+      res.json({ success: true, message: "Report deleted successfully" });
+    } catch (error) {
+      console.error("Failed to delete report:", error);
+      res.status(500).json({ error: "Failed to delete report" });
+    }
+  });
+
   // ============= SPECIAL REQUEST ROUTES =============
 
   // Create special request (Employee)
