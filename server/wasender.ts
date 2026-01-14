@@ -494,3 +494,33 @@ export async function notifyAutoClosed(
   // Auto-close is an important alert - send as ending notification so it reaches individual based on preference
   await sendNotification(message, employee, settings, "alert", true);
 }
+
+/**
+ * Send a direct personal WhatsApp message to an individual phone number
+ * Used for direct employee notifications like special request status updates
+ */
+export async function sendPersonalWhatsApp(
+  phone: string,
+  message: string,
+  settings: WasenderSettings
+): Promise<boolean> {
+  if (!settings.apiToken || !settings.isActive) {
+    console.log("WASENDER not configured or not active, skipping personal message.");
+    return false;
+  }
+
+  if (!phone || phone.trim() === "") {
+    console.log("No phone number provided, skipping personal message.");
+    return false;
+  }
+
+  // Clean phone number (remove spaces, dashes, etc)
+  const cleanPhone = phone.replace(/[\s\-\(\)]/g, "");
+  
+  try {
+    return await sendToTarget(cleanPhone, message, settings.apiToken);
+  } catch (error) {
+    console.error("Failed to send personal WhatsApp message:", error);
+    return false;
+  }
+}

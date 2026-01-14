@@ -190,6 +190,82 @@ export default function SpecialRequestPage() {
   const [newRequestOpen, setNewRequestOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
+  
+  // New request date management
+  const [requestDates, setRequestDates] = useState<Array<{date: string, shiftType: string}>>([]);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedShiftType, setSelectedShiftType] = useState("");
+  
+  // Get shift type options based on user's shift configuration
+  const getShiftTypeOptions = () => {
+    if (!user) return [];
+    
+    switch (user.shiftType) {
+      case "open_shift":
+        return [{ value: "complete", label: "Complete Shift" }];
+      case "one_shift":
+        return [{ value: "single", label: "Complete Shift" }];
+      case "two_shifts":
+        return [
+          { value: "morning", label: "Morning Shift" },
+          { value: "evening", label: "Evening Shift" },
+          { value: "both", label: "Both Shifts" },
+        ];
+      default:
+        return [{ value: "complete", label: "Complete Shift" }];
+    }
+  };
+  
+  const shiftTypeOptions = getShiftTypeOptions();
+  
+  // Add date to list
+  const addDateToList = () => {
+    if (!selectedDate || !selectedShiftType) return;
+    
+    // Check if this date/shift combination already exists
+    const exists = requestDates.some(
+      d => d.date === selectedDate && d.shiftType === selectedShiftType
+    );
+    
+    if (exists) {
+      toast({
+        title: "Already Added",
+        description: "This date and shift combination is already in your list.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setRequestDates([...requestDates, { date: selectedDate, shiftType: selectedShiftType }]);
+    setSelectedDate("");
+    setSelectedShiftType("");
+  };
+  
+  // Remove date from list
+  const removeDateFromList = (index: number) => {
+    setRequestDates(requestDates.filter((_, i) => i !== index));
+  };
+  
+  // Reset form
+  const resetRequestForm = () => {
+    setTitle("");
+    setDetails("");
+    setRequestDates([]);
+    setSelectedDate("");
+    setSelectedShiftType("");
+  };
+  
+  // Get shift label
+  const getShiftLabel = (shiftType: string) => {
+    switch (shiftType) {
+      case "morning": return "Morning Shift";
+      case "evening": return "Evening Shift";
+      case "both": return "Both Shifts";
+      case "complete": return "Complete Shift";
+      case "single": return "Complete Shift";
+      default: return shiftType;
+    }
+  };
 
   // Fetch requests for selected month
   const {
@@ -274,14 +350,14 @@ export default function SpecialRequestPage() {
         title,
         details,
         month: currentMonth, // Always use current month for new requests
+        requestDates: requestDates, // New: include the dates and shifts
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => {
       toast({ title: "Success", description: "Request submitted successfully!" });
-      setTitle("");
-      setDetails("");
+      resetRequestForm();
       setNewRequestOpen(false);
       // Reset to current month to see the new request
       setSelectedYear(currentYear);
@@ -741,8 +817,11 @@ export default function SpecialRequestPage() {
         )}
 
         {/* New Request Dialog */}
-        <Dialog open={newRequestOpen} onOpenChange={setNewRequestOpen}>
-          <DialogContent className="sm:max-w-lg">
+        <Dialog open={newRequestOpen} onOpenChange={(open) => {
+          setNewRequestOpen(open);
+          if (!open) resetRequestForm();
+        }}>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-primary" />
@@ -754,6 +833,96 @@ export default function SpecialRequestPage() {
             </DialogHeader>
 
             <div className="space-y-4 py-4">
+              {/* Date and Shift Selection */}
+              <div className="space-y-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4" />
+                  Add Leave Dates
+                </Label>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="request-date" className="text-xs text-muted-foreground">
+                      Date
+                    </Label>
+                    <Input
+                      id="request-date"
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="h-9"
+                      data-testid="input-request-date"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <Label htmlFor="shift-type" className="text-xs text-muted-foreground">
+                      Shift Type
+                    </Label>
+                    <Select value={selectedShiftType} onValueChange={setSelectedShiftType}>
+                      <SelectTrigger className="h-9" data-testid="select-shift-type">
+                        <SelectValue placeholder="Select shift" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {shiftTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={addDateToList}
+                  disabled={!selectedDate || !selectedShiftType}
+                  data-testid="button-add-date"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Date
+                </Button>
+                
+                {/* List of added dates */}
+                {requestDates.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <Label className="text-xs text-muted-foreground">Added Dates ({requestDates.length})</Label>
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                      {requestDates.map((item, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-2 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                        >
+                          <div className="flex items-center gap-2 text-sm">
+                            <Calendar className="w-3.5 h-3.5 text-primary" />
+                            <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
+                            <span className="text-muted-foreground">-</span>
+                            <Badge variant="secondary" className="text-xs">
+                              {getShiftLabel(item.shiftType)}
+                            </Badge>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            onClick={() => removeDateFromList(index)}
+                            data-testid={`button-remove-date-${index}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Title */}
               <div className="space-y-2">
                 <Label htmlFor="title">
                   Title <span className="text-red-500">*</span>
@@ -762,10 +931,12 @@ export default function SpecialRequestPage() {
                   id="title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g., Leave Request - 3 Days"
+                  placeholder="e.g., Leave Request - Family Event"
+                  data-testid="input-request-title"
                 />
               </div>
 
+              {/* Details */}
               <div className="space-y-2">
                 <Label htmlFor="details">
                   Details <span className="text-red-500">*</span>
@@ -774,8 +945,9 @@ export default function SpecialRequestPage() {
                   id="details"
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
-                  placeholder="Provide details including dates, reasons, and any relevant information..."
-                  rows={5}
+                  placeholder="Provide reasons and any relevant information..."
+                  rows={4}
+                  data-testid="input-request-details"
                 />
               </div>
             </div>
@@ -786,7 +958,8 @@ export default function SpecialRequestPage() {
               </Button>
               <Button
                 onClick={() => createMutation.mutate()}
-                disabled={createMutation.isPending || !title.trim() || !details.trim()}
+                disabled={createMutation.isPending || !title.trim() || !details.trim() || requestDates.length === 0}
+                data-testid="button-submit-request"
               >
                 {createMutation.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

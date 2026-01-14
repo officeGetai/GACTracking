@@ -26,6 +26,7 @@ import {
   notifyShiftReportReminder,
   notifySpecialRequestCreated,
   sendTestMessage,
+  sendPersonalWhatsApp,
   type WasenderSettings
 } from "./wasender";
 import connectPg from "connect-pg-simple";
@@ -2745,6 +2746,7 @@ export async function registerRoutes(
         month: req.body.month || new Date().toISOString().slice(0, 7),
         status: "sent_for_approval",
         archived: false,
+        requestDates: req.body.requestDates || null, // Array of {date, shiftType}
       };
 
       console.log("Creating special request:", requestData);
@@ -2833,16 +2835,40 @@ export async function registerRoutes(
   // Update special request status (Admin)
   app.patch("/api/admin/requests/special/:id", requireAdmin, async (req, res) => {
     try {
-      const { status } = req.body;
+      const { status, adminResponse, requestDates } = req.body;
 
       if (!status || !SPECIAL_REQUEST_STATUSES.includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
 
-      const request = await storage.updateSpecialRequest(req.params.id, { status });
+      // Build update data
+      const updateData: any = { status };
+      if (adminResponse !== undefined) {
+        updateData.adminResponse = adminResponse;
+      }
+      if (requestDates !== undefined) {
+        updateData.requestDates = requestDates;
+      }
+
+      const request = await storage.updateSpecialRequest(req.params.id, updateData);
 
       if (!request) {
         return res.status(404).json({ error: "Request not found" });
+      }
+
+      // Get the employee for notification
+      const employee = await storage.getUser(request.userId);
+
+      // If approved, mark employee as absent for the specified dates
+      if (status === "approved" && request.requestDates && Array.isArray(request.requestDates)) {
+        for (const dateEntry of request.requestDates as Array<{date: string, shiftType: string}>) {
+          try {
+            // Mark the employee as absent for this date/shift
+            await storage.markEmployeeAbsent(request.userId, dateEntry.date, dateEntry.shiftType);
+          } catch (err) {
+            console.error(`Failed to mark absence for ${dateEntry.date}:`, err);
+          }
+        }
       }
 
       // Add activity log for status change
@@ -2852,6 +2878,51 @@ export async function registerRoutes(
         details: `Updated special request status to ${status} for ${request.userId}`,
         timestamp: new Date(),
       });
+
+      // Send WhatsApp notification to employee when status changes
+      if (employee && employee.phone) {
+        const statusLabel = status === "approved" ? "Approved" : 
+                           status === "not_approved" ? "Rejected" : 
+                           status === "revision" ? "Revision Requested" : status;
+        
+        // Format dates for message
+        let datesText = "Not specified";
+        if (request.requestDates && Array.isArray(request.requestDates)) {
+          datesText = (request.requestDates as Array<{date: string, shiftType: string}>)
+            .map(d => {
+              const shiftLabel = d.shiftType === "morning" ? "Morning Shift" :
+                                d.shiftType === "evening" ? "Evening Shift" :
+                                d.shiftType === "both" ? "Both Shifts" : "Complete Shift";
+              return `  • ${d.date} - ${shiftLabel}`;
+            })
+            .join("\n");
+        }
+
+        const message = `📨 SPECIAL REQUEST – ADMIN RESPONSE
+
+👤 Employee: ${employee.firstName} ${employee.lastName}
+🏢 Department: ${employee.department || "Not Assigned"}
+🕐 Last Updated: ${format(new Date(), "MMM d, yyyy 'at' h:mm a")}
+
+📌 Request Title: ${request.title}
+🛂 Admin Response:
+${adminResponse || "No response message provided."}
+
+📅 Request Dates:
+${datesText}
+
+✅ Status: ${statusLabel}`;
+
+        getWasenderSettings().then(async (settings) => {
+          if (settings.isActive && settings.instanceId && settings.apiToken) {
+            try {
+              await sendPersonalWhatsApp(employee.phone!, message, settings);
+            } catch (err) {
+              console.error("Failed to send WhatsApp notification to employee:", err);
+            }
+          }
+        }).catch(err => console.error("WhatsApp settings error:", err));
+      }
 
       res.json(request);
     } catch (error) {

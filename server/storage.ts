@@ -218,6 +218,9 @@ export interface IStorage {
   // Incomplete shifts
   getIncompleteShiftsBeforeDate(userId: string, beforeDate: string): Promise<Shift[]>;
   getOrCreateShiftForDate(userId: string, date: string): Promise<Shift>;
+  
+  // Mark employee as absent for approved leave requests
+  markEmployeeAbsent(userId: string, date: string, shiftType: string): Promise<void>;
 
   // Dashboard stats
   getDashboardStats(): Promise<{
@@ -736,6 +739,38 @@ export class DatabaseStorage implements IStorage {
     }
 
     return shift;
+  }
+  
+  /**
+   * Mark an employee as absent for a specific date and shift type
+   * Used when special leave requests are approved
+   */
+  async markEmployeeAbsent(userId: string, date: string, shiftType: string): Promise<void> {
+    // Get or create a shift record for this date
+    let shift = await this.getShiftByUserAndDate(userId, date);
+    
+    if (!shift) {
+      // Create a new shift record marked as absent
+      shift = await this.createShift({
+        userId,
+        date,
+        status: "absent",
+        notes: `Approved leave - ${shiftType}`,
+      });
+    } else {
+      // Update existing shift to mark as absent
+      // The notes field indicates which shift(s) are on leave
+      const existingNotes = shift.notes || "";
+      const newNote = `Approved leave - ${shiftType}`;
+      const updatedNotes = existingNotes ? `${existingNotes}; ${newNote}` : newNote;
+      
+      await this.updateShift(shift.id, {
+        status: "absent",
+        notes: updatedNotes,
+      });
+    }
+    
+    console.log(`Marked ${userId} as absent on ${date} for ${shiftType}`);
   }
 
   async getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]> {
