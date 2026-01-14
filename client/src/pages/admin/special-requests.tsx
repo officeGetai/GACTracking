@@ -25,6 +25,8 @@ import {
   Calendar,
   CalendarDays,
   User,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -275,6 +277,43 @@ export default function AdminSpecialRequestsPage() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [responseComment, setResponseComment] = useState("");
   const [responseStatus, setResponseStatus] = useState("");
+  
+  // New: Edited request dates for admin to modify before approval
+  const [editedRequestDates, setEditedRequestDates] = useState<Array<{date: string, shiftType: string}>>([]);
+  const [newDateInput, setNewDateInput] = useState("");
+  const [newShiftTypeInput, setNewShiftTypeInput] = useState("");
+  
+  // Get shift label helper
+  const getShiftLabel = (shiftType: string) => {
+    switch (shiftType) {
+      case "morning": return "Morning Shift";
+      case "evening": return "Evening Shift";
+      case "both": return "Both Shifts";
+      case "complete": return "Complete Shift";
+      case "single": return "Complete Shift";
+      default: return shiftType;
+    }
+  };
+  
+  // Get shift options based on employee's shift type
+  const getShiftOptionsForEmployee = (employee: any) => {
+    if (!employee) return [{ value: "complete", label: "Complete Shift" }];
+    
+    switch (employee.shiftType) {
+      case "open_shift":
+        return [{ value: "complete", label: "Complete Shift" }];
+      case "one_shift":
+        return [{ value: "single", label: "Complete Shift" }];
+      case "two_shifts":
+        return [
+          { value: "morning", label: "Morning Shift" },
+          { value: "evening", label: "Evening Shift" },
+          { value: "both", label: "Both Shifts" },
+        ];
+      default:
+        return [{ value: "complete", label: "Complete Shift" }];
+    }
+  };
 
   // Fetch employees
   const { data: employees = [] } = useQuery({
@@ -385,12 +424,24 @@ export default function AdminSpecialRequestsPage() {
     mutationFn: async () => {
       if (!selectedRequestId) throw new Error("No request selected");
       const actualStatus = responseStatus && responseStatus !== "no_change" ? responseStatus : undefined;
-      const res = await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
+      
+      // If there's a status change, use PATCH endpoint with edited dates
+      if (actualStatus) {
+        const res = await apiRequest("PATCH", `/api/admin/requests/special/${selectedRequestId}`, {
+          status: actualStatus,
+          adminResponse: responseComment,
+          requestDates: editedRequestDates.length > 0 ? editedRequestDates : undefined,
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      
+      // Also add comment to conversation thread
+      const commentRes = await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
         comment: responseComment,
         statusChange: actualStatus,
       });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      if (!commentRes.ok) throw new Error(await commentRes.text());
+      return commentRes.json();
     },
     onSuccess: () => {
       toast({ title: "Sent!", description: "Your response has been delivered." });
@@ -407,11 +458,21 @@ export default function AdminSpecialRequestsPage() {
   const quickActionMutation = useMutation({
     mutationFn: async ({ status, comment }: { status: string; comment: string }) => {
       if (!selectedRequestId) throw new Error("No request selected");
-      const res = await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
+      
+      // Use PATCH endpoint to update status with admin response and edited dates
+      const res = await apiRequest("PATCH", `/api/admin/requests/special/${selectedRequestId}`, {
+        status,
+        adminResponse: comment,
+        requestDates: editedRequestDates.length > 0 ? editedRequestDates : undefined,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      
+      // Also add a comment for the conversation thread
+      await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
         comment,
         statusChange: status,
       });
-      if (!res.ok) throw new Error(await res.text());
+      
       return res.json();
     },
     onSuccess: (_, variables) => {
@@ -430,6 +491,33 @@ export default function AdminSpecialRequestsPage() {
       setSelectedRequestId(filteredRequests[0].id);
     }
   }, [filteredRequests, selectedRequestId]);
+  
+  // Sync edited dates when request changes
+  useEffect(() => {
+    if (selectedRequest?.requestDates && Array.isArray(selectedRequest.requestDates)) {
+      setEditedRequestDates(selectedRequest.requestDates as Array<{date: string, shiftType: string}>);
+    } else {
+      setEditedRequestDates([]);
+    }
+  }, [selectedRequest?.id, selectedRequest?.requestDates]);
+  
+  // Add date to edited list
+  const addEditedDate = () => {
+    if (!newDateInput || !newShiftTypeInput) return;
+    const exists = editedRequestDates.some(d => d.date === newDateInput && d.shiftType === newShiftTypeInput);
+    if (exists) {
+      toast({ title: "Already exists", description: "This date/shift combination is already in the list.", variant: "destructive" });
+      return;
+    }
+    setEditedRequestDates([...editedRequestDates, { date: newDateInput, shiftType: newShiftTypeInput }]);
+    setNewDateInput("");
+    setNewShiftTypeInput("");
+  };
+  
+  // Remove date from edited list
+  const removeEditedDate = (index: number) => {
+    setEditedRequestDates(editedRequestDates.filter((_, i) => i !== index));
+  };
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -798,6 +886,100 @@ export default function AdminSpecialRequestsPage() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Request Dates Section */}
+                      {(editedRequestDates.length > 0 || selectedRequest.status === "sent_for_approval") && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-800">
+                          <div className="flex items-center gap-2 mb-3">
+                            <CalendarDays className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                              Request Dates
+                            </span>
+                            {selectedRequest.status === "sent_for_approval" && (
+                              <Badge variant="secondary" className="text-[10px] ml-auto">
+                                Editable
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          {/* Display dates list */}
+                          {editedRequestDates.length > 0 ? (
+                            <div className="space-y-2 mb-3">
+                              {editedRequestDates.map((item, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-800"
+                                >
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                                    <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
+                                    <span className="text-slate-400">-</span>
+                                    <Badge variant="outline" className="text-xs">
+                                      {getShiftLabel(item.shiftType)}
+                                    </Badge>
+                                  </div>
+                                  {selectedRequest.status === "sent_for_approval" && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                      onClick={() => removeEditedDate(index)}
+                                      data-testid={`button-remove-admin-date-${index}`}
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-500 mb-3">No dates specified</p>
+                          )}
+                          
+                          {/* Add new date (only for pending requests) */}
+                          {selectedRequest.status === "sent_for_approval" && (
+                            <div className="flex items-end gap-2 pt-2 border-t border-blue-200 dark:border-blue-700">
+                              <div className="flex-1">
+                                <label className="text-[10px] text-slate-500 mb-1 block">Date</label>
+                                <Input
+                                  type="date"
+                                  value={newDateInput}
+                                  onChange={(e) => setNewDateInput(e.target.value)}
+                                  className="h-8 text-xs"
+                                  data-testid="input-admin-new-date"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] text-slate-500 mb-1 block">Shift</label>
+                                <Select value={newShiftTypeInput} onValueChange={setNewShiftTypeInput}>
+                                  <SelectTrigger className="h-8 text-xs" data-testid="select-admin-shift-type">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {getShiftOptionsForEmployee(selectedRequest.user).map((option) => (
+                                      <SelectItem key={option.value} value={option.value}>
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                onClick={addEditedDate}
+                                disabled={!newDateInput || !newShiftTypeInput}
+                                data-testid="button-admin-add-date"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Comments */}
                       {commentsLoading ? (
