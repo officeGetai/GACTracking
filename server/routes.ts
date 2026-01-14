@@ -854,6 +854,105 @@ export async function registerRoutes(
     }
   });
 
+  // Edit shift clock in/out times (Admin can modify any field)
+  app.patch("/api/admin/shifts/:shiftId", requireAdmin, async (req, res) => {
+    try {
+      const { shiftId } = req.params;
+      const { 
+        morningClockIn, 
+        morningClockOut, 
+        eveningClockIn, 
+        eveningClockOut,
+        morningLateMinutes,
+        eveningLateMinutes,
+        status,
+        notes
+      } = req.body;
+
+      // Get existing shift
+      const shift = await storage.getShiftById(shiftId);
+      if (!shift) {
+        return res.status(404).json({ error: "Shift not found" });
+      }
+
+      // Build update object - only include fields that are explicitly provided
+      const updates: any = {};
+      
+      // Handle morningClockIn - can be null to delete, a date string to update, or undefined to skip
+      if (morningClockIn !== undefined) {
+        updates.morningClockIn = morningClockIn ? new Date(morningClockIn) : null;
+      }
+      if (morningClockOut !== undefined) {
+        updates.morningClockOut = morningClockOut ? new Date(morningClockOut) : null;
+      }
+      if (eveningClockIn !== undefined) {
+        updates.eveningClockIn = eveningClockIn ? new Date(eveningClockIn) : null;
+      }
+      if (eveningClockOut !== undefined) {
+        updates.eveningClockOut = eveningClockOut ? new Date(eveningClockOut) : null;
+      }
+      if (morningLateMinutes !== undefined) {
+        updates.morningLateMinutes = morningLateMinutes;
+      }
+      if (eveningLateMinutes !== undefined) {
+        updates.eveningLateMinutes = eveningLateMinutes;
+      }
+      if (status !== undefined) {
+        updates.status = status;
+      }
+      if (notes !== undefined) {
+        updates.notes = notes;
+      }
+
+      // Update shift
+      const updatedShift = await storage.updateShift(shiftId, updates);
+
+      // Log admin action
+      await storage.createActivityLog({
+        userId: req.session.userId!,
+        action: "admin_shift_edit",
+        details: `Admin edited shift ${shiftId} for employee ${shift.userId}: ${JSON.stringify(updates)}`,
+        timestamp: new Date(),
+      });
+
+      console.log(`[Admin] Shift ${shiftId} updated:`, updates);
+      res.json(updatedShift);
+    } catch (error) {
+      console.error("Failed to update shift:", error);
+      res.status(500).json({ error: "Failed to update shift" });
+    }
+  });
+
+  // Delete entire shift record (Admin only)
+  app.delete("/api/admin/shifts/:shiftId", requireAdmin, async (req, res) => {
+    try {
+      const { shiftId } = req.params;
+
+      // Get existing shift for logging
+      const shift = await storage.getShiftById(shiftId);
+      if (!shift) {
+        return res.status(404).json({ error: "Shift not found" });
+      }
+
+      // Delete the shift
+      await storage.deleteShift(shiftId);
+
+      // Log admin action
+      await storage.createActivityLog({
+        userId: req.session.userId!,
+        action: "admin_shift_delete",
+        details: `Admin deleted shift ${shiftId} for employee ${shift.userId} on ${shift.date}`,
+        timestamp: new Date(),
+      });
+
+      console.log(`[Admin] Shift ${shiftId} deleted`);
+      res.json({ success: true, message: "Shift deleted successfully" });
+    } catch (error) {
+      console.error("Failed to delete shift:", error);
+      res.status(500).json({ error: "Failed to delete shift" });
+    }
+  });
+
   // ============= ADMIN ROUTES =============
 
   // Get dashboard stats

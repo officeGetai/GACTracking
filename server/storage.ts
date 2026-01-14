@@ -122,6 +122,7 @@ export interface IStorage {
   getShiftByUserAndDate(userId: string, date: string): Promise<Shift | undefined>;
   createShift(shift: InsertShift): Promise<Shift>;
   updateShift(id: string, data: Partial<InsertShift>): Promise<Shift | undefined>;
+  deleteShift(id: string): Promise<void>;
   getShiftsByUser(userId: string, limit?: number): Promise<Shift[]>;
   getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]>;
   getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]>;
@@ -620,6 +621,10 @@ export class DatabaseStorage implements IStorage {
   async updateShift(id: string, data: Partial<InsertShift>): Promise<Shift | undefined> {
     const [shift] = await db.update(shifts).set(data).where(eq(shifts.id, id)).returning();
     return shift || undefined;
+  }
+
+  async deleteShift(id: string): Promise<void> {
+    await db.delete(shifts).where(eq(shifts.id, id));
   }
 
   async getShiftsByUser(userId: string, limit: number = 30): Promise<Shift[]> {
