@@ -2196,6 +2196,72 @@ export async function registerRoutes(
     }
   });
 
+  // Extend overtime window - employee confirms they are still working
+  app.post("/api/employee/extend-overtime", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const now = new Date();
+
+      // Get effective working date
+      const { workingDate } = await getEffectiveWorkingDate(userId);
+
+      // Check if employee has an active shift
+      const shift = await storage.getShiftByUserAndDate(userId, workingDate);
+      if (!shift) {
+        return res.status(400).json({ error: "No active shift found for today" });
+      }
+
+      const isMorningActive = shift.morningClockIn && !shift.morningClockOut;
+      const isEveningActive = shift.eveningClockIn && !shift.eveningClockOut;
+
+      if (!isMorningActive && !isEveningActive) {
+        return res.status(400).json({ error: "No active shift. You must be clocked in to extend overtime" });
+      }
+
+      const activePeriod = isEveningActive ? "evening" : "morning";
+
+      // Update shift with overtime extension timestamp
+      const updated = await storage.updateShift(shift.id, {
+        lastOvertimeExtension: now,
+        overtimeReminderCount: (shift.overtimeReminderCount || 0) + 1,
+      });
+
+      await storage.createActivityLog({
+        userId,
+        action: "overtime_extension",
+        details: `Extended overtime window during ${activePeriod} shift. Extension #${(shift.overtimeReminderCount || 0) + 1}`,
+        timestamp: now,
+      });
+
+      // Send WhatsApp notification to alert group
+      const user = await storage.getUser(userId);
+      if (user) {
+        const fullName = `${user.firstName} ${user.lastName}`;
+        getWasenderSettings().then(async (settings) => {
+          if (settings.isActive && settings.apiToken && settings.trackingAlertsGroupId) {
+            const { sendWhatsAppMessage } = await import("./wasender");
+            await sendWhatsAppMessage(
+              settings.trackingAlertsGroupId,
+              `[Overtime Extended] ${fullName} has confirmed they are still working and extended their overtime window.`,
+              settings.apiToken,
+              true
+            );
+          }
+        }).catch(err => console.error("WhatsApp notification error:", err));
+      }
+
+      res.json({
+        success: true,
+        message: "Overtime window extended successfully. Auto-close timer has been reset.",
+        extensionCount: (shift.overtimeReminderCount || 0) + 1,
+        extendedAt: now.toISOString(),
+      });
+    } catch (error) {
+      console.error("Failed to extend overtime:", error);
+      res.status(500).json({ error: "Failed to extend overtime window" });
+    }
+  });
+
   // Get employee's shift history with breaks included
   app.get("/api/employee/shifts", requireAuth, async (req, res) => {
     try {
