@@ -106,6 +106,9 @@ export const shifts = pgTable("shifts", {
   overtimeNotificationSent: boolean("overtime_notification_sent").default(
     false,
   ),
+  // Overtime window tracking
+  lastOvertimeExtension: timestamp("last_overtime_extension"),
+  overtimeReminderCount: integer("overtime_reminder_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
