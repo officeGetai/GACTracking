@@ -1785,6 +1785,49 @@ export default function EmployeeDashboard() {
     setIsEndingBreak(false);
   };
 
+  // Overtime Extension State
+  const [isExtendingOvertime, setIsExtendingOvertime] = useState(false);
+
+  // Calculate if current time is past scheduled shift end time
+  const isOvertimeEligible = useMemo(() => {
+    if (!isActive || isOpenShiftUser) return false;
+    
+    let scheduledEndTime: string | null = null;
+    
+    if (user?.shiftType === "one_shift") {
+      scheduledEndTime = user?.shiftEndTime || null;
+    } else if (user?.shiftType === "two_shifts") {
+      scheduledEndTime = activeTab === "morning" ? user?.morningShiftEnd : user?.eveningShiftEnd;
+    }
+    
+    if (!scheduledEndTime) return false;
+    
+    // Get scheduled end time for today
+    const now = currentTime;
+    const [hours, minutes] = scheduledEndTime.split(':').map(Number);
+    const scheduledEnd = new Date(now);
+    scheduledEnd.setHours(hours, minutes, 0, 0);
+    
+    // Handle cross-midnight shifts (if end time appears to be before clock-in, add 24 hours)
+    if (currentStart) {
+      const clockInTime = new Date(currentStart);
+      if (scheduledEnd <= clockInTime) {
+        scheduledEnd.setDate(scheduledEnd.getDate() + 1);
+      }
+    }
+    
+    return now > scheduledEnd;
+  }, [isActive, isOpenShiftUser, user, activeTab, currentTime, currentStart]);
+
+  const extendOvertime = async () => {
+    setIsExtendingOvertime(true);
+    await handleMutation(
+      apiRequest("POST", "/api/employee/extend-overtime"),
+      "Overtime window extended! Auto-close timer has been reset."
+    );
+    setIsExtendingOvertime(false);
+  };
+
   // Loom link validation
   const handleLoomLinkChange = (value: string) => {
     setLoomLinks(value);
@@ -2271,6 +2314,36 @@ export default function EmployeeDashboard() {
                         <Unlock className="w-3 h-3 mr-1" />Unlocked
                       </Badge>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Overtime Extension Card - Shows when past scheduled end time */}
+            {isOvertimeEligible && (
+              <Card className="border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-full bg-purple-100 dark:bg-purple-900/50">
+                      <Timer className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-purple-800 dark:text-purple-400">Working Overtime</p>
+                      <p className="text-xs text-purple-600">Your scheduled shift time has ended. Still working?</p>
+                    </div>
+                    <Button
+                      onClick={extendOvertime}
+                      disabled={isExtendingOvertime}
+                      className="bg-purple-600 hover:bg-purple-700 text-white gap-2"
+                      data-testid="button-extend-overtime"
+                    >
+                      {isExtendingOvertime ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Clock className="w-4 h-4" />
+                      )}
+                      Extend Overtime
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
