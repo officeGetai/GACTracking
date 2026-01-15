@@ -219,27 +219,30 @@ async function checkAndAutoCloseShifts() {
                     if (now >= autoCloseTime) {
                         console.log(`[ShiftScheduler] Auto-closing MORNING shift for ${user.username}`);
 
+                        // Use the scheduled shift end time as the clock-out time (not the auto-close time)
+                        const clockOutTime = endDate;
+
                         // 1. End active breaks
                         const activeBreak = await storage.getActiveBreakForDate(user.id, shiftDate);
                         if (activeBreak) {
-                            const breakDuration = Math.floor((autoCloseTime.getTime() - new Date(activeBreak.startTime).getTime()) / 60000);
+                            const breakDuration = Math.floor((clockOutTime.getTime() - new Date(activeBreak.startTime).getTime()) / 60000);
                             await storage.updateBreak(activeBreak.id, {
-                                endTime: autoCloseTime,
+                                endTime: clockOutTime,
                                 durationMinutes: breakDuration > 0 ? breakDuration : 0
                             });
                         }
 
-                        // 2. Set Morning Clock Out
+                        // 2. Set Morning Clock Out to the scheduled shift end time
                         await storage.updateShift(shift.id, {
-                            morningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 3h after shift end"
+                            morningClockOut: clockOutTime,
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed at scheduled end time"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Morning shift auto-closed (3h after configured end time: ${scheduledEndTime})`,
+                            details: `Morning shift auto-closed at scheduled end time: ${scheduledEndTime}`,
                             timestamp: now
                         });
 
@@ -267,27 +270,30 @@ async function checkAndAutoCloseShifts() {
                     if (now >= autoCloseTime) {
                         console.log(`[ShiftScheduler] Auto-closing EVENING shift for ${user.username}`);
 
+                        // Use the scheduled shift end time as the clock-out time (not the auto-close time)
+                        const clockOutTime = endDate;
+
                         // 1. End active breaks
                         const activeBreak = await storage.getActiveBreakForDate(user.id, shiftDate);
                         if (activeBreak) {
-                            const breakDuration = Math.floor((autoCloseTime.getTime() - new Date(activeBreak.startTime).getTime()) / 60000);
+                            const breakDuration = Math.floor((clockOutTime.getTime() - new Date(activeBreak.startTime).getTime()) / 60000);
                             await storage.updateBreak(activeBreak.id, {
-                                endTime: autoCloseTime,
+                                endTime: clockOutTime,
                                 durationMinutes: breakDuration > 0 ? breakDuration : 0
                             });
                         }
 
-                        // 2. Set Evening Clock Out
+                        // 2. Set Evening Clock Out to the scheduled shift end time
                         await storage.updateShift(shift.id, {
-                            eveningClockOut: autoCloseTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed 3h after shift end"
+                            eveningClockOut: clockOutTime,
+                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed at scheduled end time"
                         });
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Evening shift auto-closed (3h after configured end time: ${scheduledEndTime})`,
+                            details: `Evening shift auto-closed at scheduled end time: ${scheduledEndTime}`,
                             timestamp: now
                         });
 
