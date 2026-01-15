@@ -961,6 +961,50 @@ export async function registerRoutes(
     }
   });
 
+  // Delete absent record only (Admin only) - allows employee to start shift
+  app.delete("/api/admin/shifts/:shiftId/absent", requireAdmin, async (req, res) => {
+    try {
+      const { shiftId } = req.params;
+
+      // Get existing shift
+      const shift = await storage.getShiftById(shiftId);
+      if (!shift) {
+        return res.status(404).json({ error: "Shift record not found" });
+      }
+
+      // Verify it's an absent record
+      if (shift.status !== 'absent') {
+        return res.status(400).json({ 
+          error: "This is not an absent record. Only absent records can be deleted using this endpoint." 
+        });
+      }
+
+      // Delete the absent record
+      await storage.deleteAbsentRecord(shiftId);
+
+      // Get employee info for logging
+      const employee = await storage.getUser(shift.userId);
+      const employeeName = employee ? `${employee.firstName} ${employee.lastName}` : shift.userId;
+
+      // Log admin action
+      await storage.createActivityLog({
+        userId: req.session.userId!,
+        action: "admin_absent_delete",
+        details: `Admin deleted absent record for ${employeeName} on ${shift.date}. Employee can now start their shift.`,
+        timestamp: new Date(),
+      });
+
+      console.log(`[Admin] Absent record ${shiftId} deleted for ${employeeName}`);
+      res.json({ 
+        success: true, 
+        message: `Absent record deleted. ${employeeName} can now clock in.` 
+      });
+    } catch (error) {
+      console.error("Failed to delete absent record:", error);
+      res.status(500).json({ error: "Failed to delete absent record" });
+    }
+  });
+
   // ============= ADMIN ROUTES =============
 
   // Get dashboard stats

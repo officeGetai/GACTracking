@@ -221,17 +221,26 @@ function calculateBreakMinutes(shift: ShiftWithBreaks | null): number {
 function getDayStatus(shift: ShiftWithBreaks | null, date: Date): DayRecord["status"] {
   if (isFuture(date)) return "future";
   if (isWeekend(date)) return "weekend";
-  if (!shift || (!shift.morningClockIn && !shift.eveningClockIn)) return "absent";
-
+  
+  // No shift = absent
+  if (!shift) return "absent";
+  
+  // Check if there are any actual clock-ins
+  const hasMorningClockIn = !!shift.morningClockIn;
+  const hasEveningClockIn = !!shift.eveningClockIn;
+  
+  // If no clock-ins at all, check if marked absent or just not started
+  if (!hasMorningClockIn && !hasEveningClockIn) {
+    return "absent";
+  }
+  
+  // If there's at least one clock-in, employee is present (or half day)
   const lateMinutes = (shift.morningLateMinutes || 0) + (shift.eveningLateMinutes || 0);
   if (lateMinutes > 0) return "late";
 
   // Check for half day (only morning or only evening)
-  const hasMorning = !!shift.morningClockIn;
-  const hasEvening = !!shift.eveningClockIn;
-  if ((hasMorning && !hasEvening) || (!hasMorning && hasEvening)) {
-    // This could be a half day depending on shift type
-    // For now, count as present
+  if ((hasMorningClockIn && !hasEveningClockIn) || (!hasMorningClockIn && hasEveningClockIn)) {
+    return "half_day";
   }
 
   return "present";
@@ -368,7 +377,7 @@ function DayCell({
             disabled={record.status === "future"}
             className={cn(
               "relative flex flex-col items-center justify-center p-1.5 rounded-lg border transition-all",
-              "hover:scale-105 hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed",
+              "hover-elevate disabled:opacity-40 disabled:cursor-not-allowed",
               getBgColor(),
               isToday && "ring-2 ring-primary ring-offset-1",
               isSelected && "ring-2 ring-violet-500 ring-offset-1"
@@ -545,7 +554,7 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
             <Button 
               size="icon" 
               variant="ghost" 
-              className="h-7 w-7 text-red-500 hover:text-red-600"
+              className="h-7 w-7"
               onClick={() => setShowDeleteConfirm(true)}
               data-testid="button-delete-shift"
             >
@@ -710,7 +719,29 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
       {record.status === "absent" && (
         <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-center">
           <XCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-          <p className="text-sm text-red-700 dark:text-red-300">No attendance record for this day</p>
+          {record.shift?.status === "absent" ? (
+            <>
+              <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
+                Marked as Absent
+              </p>
+              <p className="text-xs text-red-600 dark:text-red-400 mb-3">
+                {record.shift.notes || "Auto-marked due to no clock-in"}
+              </p>
+              {onDelete && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  data-testid="button-delete-absent"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  Remove Absent Record
+                </Button>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-red-700 dark:text-red-300">No attendance record for this day</p>
+          )}
         </div>
       )}
 
@@ -718,20 +749,32 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Shift Record</AlertDialogTitle>
+            <AlertDialogTitle>
+              {record.shift?.status === "absent" ? "Remove Absent Record" : "Delete Shift Record"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this shift record for {format(record.date, "MMMM d, yyyy")}? 
-              This action cannot be undone and will remove all clock in/out times and associated data.
+              {record.shift?.status === "absent" ? (
+                <>
+                  Are you sure you want to remove the absent record for {format(record.date, "MMMM d, yyyy")}?
+                  <br /><br />
+                  This will allow the employee to clock in for this day.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete this shift record for {format(record.date, "MMMM d, yyyy")}? 
+                  This action cannot be undone and will remove all clock in/out times and associated data.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={handleDelete}
-              className="bg-red-500 hover:bg-red-600"
+              className="bg-destructive text-destructive-foreground"
               data-testid="button-confirm-delete"
             >
-              Delete
+              {record.shift?.status === "absent" ? "Remove" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -869,7 +912,7 @@ export default function AttendancePage() {
     },
   });
 
-  // Delete shift mutation
+  // Delete shift mutation (for regular shifts)
   const deleteShiftMutation = useMutation({
     mutationFn: async (shiftId: string) => {
       const res = await apiRequest("DELETE", `/api/admin/shifts/${shiftId}`);
@@ -889,6 +932,26 @@ export default function AttendancePage() {
     },
   });
 
+  // Delete absent record mutation (for absent-only records)
+  const deleteAbsentMutation = useMutation({
+    mutationFn: async (shiftId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/shifts/${shiftId}/absent`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Success", description: data.message || "Absent record removed successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/employee-shifts", selectedEmployeeId, selectedMonth] });
+      setSelectedDayRecord(null);
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to remove absent record", 
+        variant: "destructive" 
+      });
+    },
+  });
+
   // Handler functions for edit and delete
   const handleEditShift = (shiftId: string, data: any) => {
     console.log("[handleEditShift] Called with shiftId:", shiftId, "data:", data);
@@ -898,7 +961,13 @@ export default function AttendancePage() {
   };
 
   const handleDeleteShift = (shiftId: string) => {
-    deleteShiftMutation.mutate(shiftId);
+    // Check if this is an absent record to use the correct endpoint
+    const shift = selectedDayRecord?.shift;
+    if (shift?.status === "absent") {
+      deleteAbsentMutation.mutate(shiftId);
+    } else {
+      deleteShiftMutation.mutate(shiftId);
+    }
   };
 
   // Create shift map by date
@@ -1350,7 +1419,7 @@ export default function AttendancePage() {
                     record={selectedDayRecord} 
                     onEdit={handleEditShift}
                     onDelete={handleDeleteShift}
-                    isSaving={editShiftMutation.isPending || deleteShiftMutation.isPending}
+                    isSaving={editShiftMutation.isPending || deleteShiftMutation.isPending || deleteAbsentMutation.isPending}
                   />
                 </div>
               </div>

@@ -223,6 +223,12 @@ export interface IStorage {
   
   // Mark employee as absent for approved leave requests
   markEmployeeAbsent(userId: string, date: string, shiftType: string): Promise<void>;
+  
+  // Get all employees with scheduled shifts (one_shift or two_shifts, not open)
+  getScheduledShiftEmployees(): Promise<SafeUser[]>;
+  
+  // Delete absent record to allow employee to start shift
+  deleteAbsentRecord(shiftId: string): Promise<void>;
 
   // Dashboard stats
   getDashboardStats(): Promise<{
@@ -777,6 +783,41 @@ export class DatabaseStorage implements IStorage {
     }
     
     console.log(`Marked ${userId} as absent on ${date} for ${shiftType}`);
+  }
+
+  /**
+   * Get all employees with scheduled shifts (one_shift or two_shifts)
+   * Open shift employees are excluded as they don't have fixed schedules
+   */
+  async getScheduledShiftEmployees(): Promise<SafeUser[]> {
+    const result = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.role, 'employee'),
+          or(
+            eq(users.shiftType, 'one_shift'),
+            eq(users.shiftType, 'two_shifts')
+          )
+        )
+      );
+    // Remove password from each user to return SafeUser
+    return result.map(({ password, ...rest }) => rest);
+  }
+
+  /**
+   * Delete an absent record to allow employee to start shift
+   * Used by admin to remove auto-marked absent status
+   */
+  async deleteAbsentRecord(shiftId: string): Promise<void> {
+    await db.delete(shifts).where(
+      and(
+        eq(shifts.id, shiftId),
+        eq(shifts.status, 'absent')
+      )
+    );
+    console.log(`Deleted absent record: ${shiftId}`);
   }
 
   async getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]> {

@@ -5,6 +5,7 @@ import { notifyShiftReportReminder, type WasenderSettings } from "./wasender";
 // Configuration
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
 const AUTO_CLOSE_DELAY_HOURS = 3; // Close 3 hours after shift end time
+const AUTO_ABSENT_DELAY_HOURS = 2; // Mark absent 2 hours after scheduled clock-in time
 
 // Helper to get WASENDER settings
 async function getWasenderSettings(): Promise<WasenderSettings> {
@@ -306,6 +307,187 @@ async function checkAndAutoCloseShifts() {
 }
 
 /**
+ * Get current date in Pakistan timezone (YYYY-MM-DD format)
+ * Uses Intl.DateTimeFormat for consistent timezone handling
+ */
+function getTodayInPakistan(): string {
+    const now = new Date();
+    // Use Intl.DateTimeFormat to get correct date parts in Pakistan timezone
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Karachi',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    return formatter.format(now); // Returns YYYY-MM-DD format
+}
+
+/**
+ * Get current time in Pakistan timezone for comparison and logging
+ * Returns a Date object representing the current moment, consistent with parseUserTime
+ */
+function getNowInPakistan(): Date {
+    // Use the same approach as parseUserTime: create a date with +05:00 offset
+    // This ensures consistent comparison and logging in Pakistan timezone
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Karachi',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    
+    const parts = formatter.formatToParts(now);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || '00';
+    
+    const year = getPart('year');
+    const month = getPart('month');
+    const day = getPart('day');
+    const hour = getPart('hour');
+    const minute = getPart('minute');
+    const second = getPart('second');
+    
+    // Create date string in Pakistan timezone (UTC+5)
+    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}+05:00`);
+}
+
+/**
+ * Auto-mark employees as absent if they haven't clocked in 2 hours after their scheduled start time
+ * Only applies to one_shift and two_shifts employees (NOT open shift)
+ */
+async function checkAndMarkAbsentEmployees() {
+    const now = getNowInPakistan();
+    const today = getTodayInPakistan();
+    console.log(`[ShiftScheduler] Checking for absent employees at ${now.toISOString()} (Pakistan date: ${today})...`);
+
+    try {
+        // Get all employees with scheduled shifts (one_shift or two_shifts)
+        const scheduledEmployees = await storage.getScheduledShiftEmployees();
+        console.log(`[ShiftScheduler] Found ${scheduledEmployees.length} employees with scheduled shifts`);
+
+        let absentCount = 0;
+
+        for (const employee of scheduledEmployees) {
+            // Get existing shift for today
+            const existingShift = await storage.getShiftByUserAndDate(employee.id, today);
+            
+            // For two_shift employees, we check absence by notes (morning/evening tracked separately)
+            // Don't skip entirely based on status - instead check each shift period independently
+
+            // ============================================================
+            // CHECK MORNING/MAIN SHIFT (one_shift uses shiftStartTime, two_shifts uses morningShiftStart)
+            // ============================================================
+            let morningStartTime: string | null = null;
+            if (employee.shiftType === 'one_shift') {
+                morningStartTime = employee.shiftStartTime;
+            } else if (employee.shiftType === 'two_shifts') {
+                morningStartTime = employee.morningShiftStart;
+            }
+
+            if (morningStartTime) {
+                const scheduledStart = parseUserTime(today, morningStartTime);
+                const absentThreshold = new Date(scheduledStart.getTime() + (AUTO_ABSENT_DELAY_HOURS * 60 * 60 * 1000));
+
+                // Check if we're past the 2-hour threshold
+                if (now >= absentThreshold) {
+                    // Check if employee has clocked in for morning shift
+                    const hasMorningClockIn = existingShift?.morningClockIn !== null;
+                    
+                    // Check if already marked absent for morning (via notes or approved leave)
+                    const shiftNotes = existingShift?.notes || "";
+                    const alreadyAbsentForMorning = shiftNotes.includes("morning");
+                    
+                    if (!hasMorningClockIn && !alreadyAbsentForMorning) {
+                        // Check if we've already marked them absent today (prevent duplicate marking)
+                        const logs = await storage.getActivityLogsByUser(employee.id, today);
+                        const alreadyMarked = logs.some(log => 
+                            log.action === "auto_absent_marked" && 
+                            log.details?.includes("morning")
+                        );
+
+                        if (!alreadyMarked) {
+                            console.log(`[ShiftScheduler] Marking ${employee.username} as ABSENT (2h past morning shift start: ${morningStartTime})`);
+                            
+                            // Mark as absent
+                            await storage.markEmployeeAbsent(employee.id, today, 'morning');
+                            
+                            // Log activity
+                            await storage.createActivityLog({
+                                userId: employee.id,
+                                action: "auto_absent_marked",
+                                details: `Auto-marked absent for morning shift (2h after scheduled start: ${morningStartTime})`,
+                                timestamp: now
+                            });
+
+                            absentCount++;
+                            // Don't skip evening check - two_shift employees need independent marking for each shift
+                        }
+                    }
+                }
+            }
+
+            // ============================================================
+            // CHECK EVENING SHIFT (only for two_shifts employees)
+            // ============================================================
+            if (employee.shiftType === 'two_shifts' && employee.eveningShiftStart) {
+                const eveningStartTime = employee.eveningShiftStart;
+                const scheduledStart = parseUserTime(today, eveningStartTime);
+                const absentThreshold = new Date(scheduledStart.getTime() + (AUTO_ABSENT_DELAY_HOURS * 60 * 60 * 1000));
+
+                // Check if we're past the 2-hour threshold
+                if (now >= absentThreshold) {
+                    // Check if employee has clocked in for evening shift
+                    const hasEveningClockIn = existingShift?.eveningClockIn !== null;
+                    
+                    // Check if already marked absent for evening (via notes or approved leave)
+                    // Need to re-fetch shift in case morning just added absent status
+                    const currentShift = await storage.getShiftByUserAndDate(employee.id, today);
+                    const shiftNotes = currentShift?.notes || "";
+                    const alreadyAbsentForEvening = shiftNotes.includes("evening");
+                    
+                    // Mark absent for evening if they haven't clocked in and not already marked
+                    if (!hasEveningClockIn && !alreadyAbsentForEvening) {
+                        const logs = await storage.getActivityLogsByUser(employee.id, today);
+                        const alreadyMarked = logs.some(log => 
+                            log.action === "auto_absent_marked" && 
+                            log.details?.includes("evening")
+                        );
+
+                        if (!alreadyMarked) {
+                            console.log(`[ShiftScheduler] Marking ${employee.username} as ABSENT for evening (2h past evening shift start: ${eveningStartTime})`);
+                            
+                            // Mark as absent for evening
+                            await storage.markEmployeeAbsent(employee.id, today, 'evening');
+                            
+                            // Log activity
+                            await storage.createActivityLog({
+                                userId: employee.id,
+                                action: "auto_absent_marked",
+                                details: `Auto-marked absent for evening shift (2h after scheduled start: ${eveningStartTime})`,
+                                timestamp: now
+                            });
+
+                            absentCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (absentCount > 0) {
+            console.log(`[ShiftScheduler] Marked ${absentCount} employees as absent.`);
+        }
+
+    } catch (error) {
+        console.error("[ShiftScheduler] Error checking absent employees:", error);
+    }
+}
+
+/**
  * Start the shift scheduler
  */
 export function startShiftScheduler() {
@@ -313,7 +495,11 @@ export function startShiftScheduler() {
 
     // Run immediately on startup
     checkAndAutoCloseShifts();
+    checkAndMarkAbsentEmployees();
 
     // Schedule periodic runs
-    setInterval(checkAndAutoCloseShifts, SCHEDULER_INTERVAL_MS);
+    setInterval(() => {
+        checkAndAutoCloseShifts();
+        checkAndMarkAbsentEmployees();
+    }, SCHEDULER_INTERVAL_MS);
 }
