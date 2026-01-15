@@ -189,6 +189,7 @@ export interface IStorage {
   getDailyShiftReportsForDateRange(startDate: string, endDate: string): Promise<(DailyShiftReport & { user: SafeUser })[]>;
   getAllDailyShiftReports(): Promise<DailyShiftReport[]>;
   getReportByShiftId(shiftId: string): Promise<DailyShiftReport | undefined>;
+  getReportByShiftIdAndType(shiftId: string, shiftType: string): Promise<DailyShiftReport | undefined>;
   deleteDailyShiftReport(id: string): Promise<boolean>;
 
   // Special Request methods
@@ -1706,6 +1707,17 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(dailyShiftReports)
       .where(eq(dailyShiftReports.shiftId, shiftId));
+    return report || undefined;
+  }
+
+  async getReportByShiftIdAndType(shiftId: string, shiftType: string): Promise<DailyShiftReport | undefined> {
+    const [report] = await db
+      .select()
+      .from(dailyShiftReports)
+      .where(and(
+        eq(dailyShiftReports.shiftId, shiftId),
+        eq(dailyShiftReports.shiftType, shiftType)
+      ));
     return report || undefined;
   }
 

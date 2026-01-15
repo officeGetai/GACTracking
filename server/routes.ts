@@ -1594,12 +1594,26 @@ export async function registerRoutes(
       }
 
       // Check if report is submitted (REQUIRED)
-      const report = await storage.getReportByShiftId(shift.id);
-      if (!report) {
-        return res.status(400).json({
-          error: "Please submit your daily report before ending the shift",
-          code: "REPORT_REQUIRED"
-        });
+      // For two_shift employees, check for morning-specific report
+      // For other shift types, check for any report
+      const user = await storage.getUser(userId);
+      let report;
+      if (user?.shiftType === 'two_shifts') {
+        report = await storage.getReportByShiftIdAndType(shift.id, 'morning');
+        if (!report) {
+          return res.status(400).json({
+            error: "Please submit your morning shift report before ending the shift",
+            code: "REPORT_REQUIRED"
+          });
+        }
+      } else {
+        report = await storage.getReportByShiftId(shift.id);
+        if (!report) {
+          return res.status(400).json({
+            error: "Please submit your daily report before ending the shift",
+            code: "REPORT_REQUIRED"
+          });
+        }
       }
 
       // Calculate total work time
@@ -1617,9 +1631,6 @@ export async function registerRoutes(
         details: `Morning shift ended. Total time: ${Math.floor(workMinutes / 60)}h ${workMinutes % 60}m`,
         timestamp: now,
       });
-
-      // Send WhatsApp notification
-      const user = await storage.getUser(userId);
       const todayBreaks = await storage.getBreaksByUserAndDate(userId, workingDate);
       // Filter breaks to only morning shift period
       const morningBreaks = todayBreaks.filter(b => b.shiftPeriod === "morning");
@@ -1856,12 +1867,26 @@ export async function registerRoutes(
       }
 
       // Check if report is submitted (REQUIRED)
-      const report = await storage.getReportByShiftId(shift.id);
-      if (!report) {
-        return res.status(400).json({
-          error: "Please submit your daily report before ending the shift",
-          code: "REPORT_REQUIRED"
-        });
+      // For two_shift employees, check for evening-specific report
+      // For other shift types, check for any report
+      const user = await storage.getUser(userId);
+      let report;
+      if (user?.shiftType === 'two_shifts') {
+        report = await storage.getReportByShiftIdAndType(shift.id, 'evening');
+        if (!report) {
+          return res.status(400).json({
+            error: "Please submit your evening shift report before ending the shift",
+            code: "REPORT_REQUIRED"
+          });
+        }
+      } else {
+        report = await storage.getReportByShiftId(shift.id);
+        if (!report) {
+          return res.status(400).json({
+            error: "Please submit your daily report before ending the shift",
+            code: "REPORT_REQUIRED"
+          });
+        }
       }
 
       const workMinutes = Math.floor(
@@ -1878,9 +1903,6 @@ export async function registerRoutes(
         details: `Evening shift ended. Total time: ${Math.floor(workMinutes / 60)}h ${workMinutes % 60}m`,
         timestamp: now,
       });
-
-      // Send WhatsApp notification
-      const user = await storage.getUser(userId);
       const todayBreaks = await storage.getBreaksByUserAndDate(userId, workingDate);
       // Filter breaks to only evening shift period
       const eveningBreaks = todayBreaks.filter(b => b.shiftPeriod === "evening");
@@ -2575,10 +2597,37 @@ export async function registerRoutes(
         shiftId = shift.id;
       }
 
+      // Get the shiftType from request (morning/evening)
+      const requestShiftType = req.body.shiftType;
+
+      // ============================================
+      // VALIDATION FOR TWO_SHIFT EMPLOYEES
+      // Must provide valid shiftType ('morning' or 'evening')
+      // ============================================
+      if (user.shiftType === 'two_shifts') {
+        if (!requestShiftType || !['morning', 'evening'].includes(requestShiftType)) {
+          return res.status(400).json({ 
+            error: "Please specify the shift type (morning or evening) for your report" 
+          });
+        }
+      }
+
       // Check if report already exists for this shift
-      const existingReport = await storage.getReportByShiftId(shiftId);
-      if (existingReport) {
-        return res.status(400).json({ error: "Report already submitted for this shift" });
+      // For two_shift employees, check by shiftId AND shiftType (allows 2 reports per day)
+      // For other shift types, check by shiftId only (1 report per day)
+      let existingReport;
+      if (user.shiftType === 'two_shifts') {
+        // Two-shift employees: Check if report exists for this specific shift period
+        existingReport = await storage.getReportByShiftIdAndType(shiftId, requestShiftType);
+        if (existingReport) {
+          return res.status(400).json({ error: `Report already submitted for ${requestShiftType} shift` });
+        }
+      } else {
+        // One-shift/Open-shift employees: Only 1 report per day
+        existingReport = await storage.getReportByShiftId(shiftId);
+        if (existingReport) {
+          return res.status(400).json({ error: "Report already submitted for this shift" });
+        }
       }
 
       // ============================================
