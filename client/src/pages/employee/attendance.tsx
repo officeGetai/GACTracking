@@ -23,6 +23,7 @@ import {
   Search,
   ChevronDown,
   SlidersHorizontal,
+  Coffee,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -64,10 +65,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { Shift } from "@shared/schema";
+import type { Shift, Break } from "@shared/schema";
 
 // Grace period constant (should match server)
 const GRACE_PERIOD_MINUTES = 15;
+
+// Shift with breaks included
+interface ShiftWithBreaks extends Shift {
+  breaks?: Break[];
+}
 
 // Extended shift type that includes generated absent records
 interface AttendanceRecord {
@@ -75,13 +81,14 @@ interface AttendanceRecord {
   date: string;
   status: "present" | "late" | "absent" | "half_day" | "incomplete" | "not_started" | "weekend" | "future";
   isGenerated: boolean; // true for absent/weekend/future records that don't exist in DB
-  shift?: Shift;
+  shift?: ShiftWithBreaks;
   morningClockIn?: Date | null;
   morningClockOut?: Date | null;
   eveningClockIn?: Date | null;
   eveningClockOut?: Date | null;
   morningLateMinutes?: number;
   eveningLateMinutes?: number;
+  breakMinutes?: number;
 }
 
 /**
@@ -209,12 +216,23 @@ function calculateDuration(
   };
 }
 
-function calculateTotalWorkTime(shift: Shift | undefined): {
-  hours: number;
-  minutes: number;
-  formatted: string;
-} {
-  if (!shift) return { hours: 0, minutes: 0, formatted: "-" };
+// Calculate total break minutes from shift breaks
+function calculateBreakMinutes(shift: ShiftWithBreaks | undefined): number {
+  if (!shift?.breaks || shift.breaks.length === 0) return 0;
+  return shift.breaks.reduce((sum, brk) => sum + (brk.durationMinutes || 0), 0);
+}
+
+// Format duration in hours and minutes
+function formatDuration(minutes: number): string {
+  if (minutes <= 0) return "0m";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Calculate GROSS work time (before subtracting breaks)
+function calculateGrossWorkTime(shift: ShiftWithBreaks | undefined): number {
+  if (!shift) return 0;
 
   let totalMinutes = 0;
 
@@ -234,13 +252,34 @@ function calculateTotalWorkTime(shift: Shift | undefined): {
     totalMinutes += eveningDuration.hours * 60 + eveningDuration.minutes;
   }
 
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
+  return totalMinutes;
+}
+
+// Calculate NET work time (after subtracting breaks)
+function calculateTotalWorkTime(shift: ShiftWithBreaks | undefined): {
+  hours: number;
+  minutes: number;
+  formatted: string;
+  grossMinutes: number;
+  breakMinutes: number;
+  netMinutes: number;
+} {
+  if (!shift) return { hours: 0, minutes: 0, formatted: "-", grossMinutes: 0, breakMinutes: 0, netMinutes: 0 };
+
+  const grossMinutes = calculateGrossWorkTime(shift);
+  const breakMinutes = calculateBreakMinutes(shift);
+  const netMinutes = Math.max(0, grossMinutes - breakMinutes);
+
+  const hours = Math.floor(netMinutes / 60);
+  const minutes = netMinutes % 60;
 
   return {
     hours,
     minutes,
-    formatted: totalMinutes > 0 ? `${hours}h ${minutes}m` : "-",
+    formatted: netMinutes > 0 ? `${hours}h ${minutes}m` : "-",
+    grossMinutes,
+    breakMinutes,
+    netMinutes,
   };
 }
 
@@ -324,13 +363,13 @@ export default function EmployeeAttendancePage() {
     queryKey: ["/api/user"],
   });
 
-  // Fetch shifts for the employee
+  // Fetch shifts for the employee (now includes breaks)
   const {
     data: shifts = [],
     isLoading,
     refetch,
     isFetching,
-  } = useQuery<Shift[]>({
+  } = useQuery<ShiftWithBreaks[]>({
     queryKey: ["/api/employee/shifts"],
   });
 
@@ -345,7 +384,7 @@ export default function EmployeeAttendancePage() {
     const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
     // Create a map of existing shifts by date
-    const shiftMap = new Map<string, Shift>();
+    const shiftMap = new Map<string, ShiftWithBreaks>();
     shifts.forEach((shift) => {
       if (shift.date.startsWith(selectedMonth)) {
         shiftMap.set(shift.date, shift);
@@ -468,17 +507,19 @@ export default function EmployeeAttendancePage() {
     const incompleteDays = workingDayRecords.filter((r) => r.status === "incomplete").length;
     const halfDays = workingDayRecords.filter((r) => r.status === "half_day").length;
 
-    // Calculate total work hours
-    let totalMinutes = 0;
+    // Calculate total NET work hours (after subtracting breaks)
+    let totalNetMinutes = 0;
+    let totalBreakMinutes = 0;
     workingDayRecords.forEach((record) => {
       if (record.shift) {
         const workTime = calculateTotalWorkTime(record.shift);
-        totalMinutes += workTime.hours * 60 + workTime.minutes;
+        totalNetMinutes += workTime.netMinutes;
+        totalBreakMinutes += workTime.breakMinutes;
       }
     });
 
-    const totalHours = Math.floor(totalMinutes / 60);
-    const remainingMinutes = totalMinutes % 60;
+    const totalHours = Math.floor(totalNetMinutes / 60);
+    const remainingMinutes = totalNetMinutes % 60;
 
     // Calculate total late minutes
     let totalLateMinutes = 0;
@@ -491,7 +532,7 @@ export default function EmployeeAttendancePage() {
     const attendanceRate =
       totalDays > 0 ? Math.round(((presentDays + lateDays + halfDays) / totalDays) * 100) : 0;
 
-    const avgWorkHours = totalDays > 0 ? (totalMinutes / totalDays / 60).toFixed(1) : "0";
+    const avgWorkHours = totalDays > 0 ? (totalNetMinutes / totalDays / 60).toFixed(1) : "0";
 
     return {
       totalDays,
@@ -503,6 +544,7 @@ export default function EmployeeAttendancePage() {
       totalHours,
       remainingMinutes,
       totalLateMinutes,
+      totalBreakMinutes,
       attendanceRate,
       avgWorkHours,
     };
@@ -645,7 +687,7 @@ export default function EmployeeAttendancePage() {
           </div>
 
           {/* Compact Stats Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             <StatCard
               title="Present"
               value={stats.presentDays}
@@ -667,11 +709,17 @@ export default function EmployeeAttendancePage() {
               color="bg-red-50 border-red-200 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400"
             />
             <StatCard
-              title="Hours"
+              title="Net Hours"
               value={stats.totalHours}
               subtitle={`${stats.remainingMinutes}m`}
               icon={Timer}
               color="bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
+            />
+            <StatCard
+              title="Break Time"
+              value={formatDuration(stats.totalBreakMinutes)}
+              icon={Coffee}
+              color="bg-orange-50 border-orange-200 text-orange-700 dark:bg-orange-950/30 dark:border-orange-800 dark:text-orange-400"
             />
             <StatCard
               title="Rate"

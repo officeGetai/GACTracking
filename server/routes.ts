@@ -2196,13 +2196,22 @@ export async function registerRoutes(
     }
   });
 
-  // Get employee's shift history
+  // Get employee's shift history with breaks included
   app.get("/api/employee/shifts", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
       const limit = parseInt(req.query.limit as string) || 30;
       const shifts = await storage.getShiftsByUser(userId, limit);
-      res.json(shifts);
+      
+      // Include breaks for each shift to calculate net working hours
+      const shiftsWithBreaks = await Promise.all(
+        shifts.map(async (shift) => {
+          const shiftBreaks = await storage.getBreaksByShift(shift.id);
+          return { ...shift, breaks: shiftBreaks };
+        })
+      );
+      
+      res.json(shiftsWithBreaks);
     } catch (error) {
       console.error("Failed to fetch shifts:", error);
       res.status(500).json({ error: "Failed to fetch shifts" });
