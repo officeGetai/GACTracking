@@ -486,7 +486,8 @@ function getNowInPakistan(): Date {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: false
+        hour12: false,
+        hourCycle: 'h23'
     });
     
     const parts = formatter.formatToParts(now);
@@ -495,9 +496,14 @@ function getNowInPakistan(): Date {
     const year = getPart('year');
     const month = getPart('month');
     const day = getPart('day');
-    const hour = getPart('hour');
+    let hour = getPart('hour');
     const minute = getPart('minute');
     const second = getPart('second');
+    
+    // Handle edge case where hour could be "24" (use "00" instead)
+    if (hour === '24') {
+        hour = '00';
+    }
     
     // Create date string in Pakistan timezone (UTC+5)
     return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}+05:00`);
