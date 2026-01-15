@@ -2239,12 +2239,11 @@ export async function registerRoutes(
         const fullName = `${user.firstName} ${user.lastName}`;
         getWasenderSettings().then(async (settings) => {
           if (settings.isActive && settings.apiToken && settings.trackingAlertsGroupId) {
-            const { sendWhatsAppMessage } = await import("./wasender");
-            await sendWhatsAppMessage(
+            const { sendGroupWhatsApp } = await import("./wasender");
+            await sendGroupWhatsApp(
               settings.trackingAlertsGroupId,
               `[Overtime Extended] ${fullName} has confirmed they are still working and extended their overtime window.`,
-              settings.apiToken,
-              true
+              settings
             );
           }
         }).catch(err => console.error("WhatsApp notification error:", err));

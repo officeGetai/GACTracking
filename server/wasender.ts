@@ -496,6 +496,33 @@ export async function notifyAutoClosed(
 }
 
 /**
+ * Send a WhatsApp message to a group by group ID
+ * Used for alerts and notifications to admin/tracking groups
+ */
+export async function sendGroupWhatsApp(
+  groupId: string,
+  message: string,
+  settings: WasenderSettings
+): Promise<boolean> {
+  if (!settings.apiToken || !settings.isActive) {
+    console.log("WASENDER not configured or not active, skipping group message.");
+    return false;
+  }
+
+  if (!groupId || groupId.trim() === "") {
+    console.log("No group ID provided, skipping group message.");
+    return false;
+  }
+
+  try {
+    return await sendToTarget(groupId, message, settings.apiToken);
+  } catch (error) {
+    console.error("Failed to send group WhatsApp message:", error);
+    return false;
+  }
+}
+
+/**
  * Send a direct personal WhatsApp message to an individual phone number
  * Used for direct employee notifications like special request status updates
  */
