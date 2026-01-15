@@ -150,13 +150,30 @@ function getAvatarGradient(name: string) {
   return gradients[(name?.charCodeAt(0) || 0) % gradients.length];
 }
 
+// Format time in Pakistan timezone (Asia/Karachi)
 function formatTime(date: string | Date | null): string {
   if (!date) return "—";
   try {
-    return format(new Date(date), "h:mm a");
+    const d = new Date(date);
+    return d.toLocaleString("en-US", {
+      timeZone: "Asia/Karachi",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
   } catch {
     return "—";
   }
+}
+
+// Get current date in Pakistan timezone (YYYY-MM-DD format)
+function getTodayInPakistan(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" });
+}
+
+// Check if a date string matches today in Pakistan timezone
+function isDateTodayInPakistan(dateStr: string): boolean {
+  return dateStr === getTodayInPakistan();
 }
 
 function formatDuration(minutes: number): string {
@@ -318,7 +335,7 @@ function DayCell({
   onClick: () => void;
 }) {
   const dayNum = format(record.date, "d");
-  const isToday = format(new Date(), "yyyy-MM-dd") === record.dateStr;
+  const isToday = isDateTodayInPakistan(record.dateStr);
 
   const getBgColor = () => {
     switch (record.status) {
