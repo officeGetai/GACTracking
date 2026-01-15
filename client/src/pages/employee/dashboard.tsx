@@ -1696,6 +1696,18 @@ export default function EmployeeDashboard() {
     return `${Math.round(totalTargetSeconds / 3600 * 10) / 10}h`;
   }, [totalTargetSeconds]);
 
+  // Calculate overtime: Net Hours - Required Hours (only positive = overtime)
+  const overtimeSeconds = useMemo(() => {
+    if (!isStarted) return 0;
+    const overtime = netWorkedSeconds - totalTargetSeconds;
+    return overtime > 0 ? overtime : 0;
+  }, [netWorkedSeconds, totalTargetSeconds, isStarted]);
+
+  const overtimeString = useMemo(() => {
+    if (overtimeSeconds <= 0) return null;
+    return formatDurationShort(overtimeSeconds);
+  }, [overtimeSeconds]);
+
   const calculateProgress = () => {
     if (!currentStart) return 0;
     return Math.min(Math.round((netWorkedSeconds / totalTargetSeconds) * 100), 100);
@@ -2265,6 +2277,26 @@ export default function EmployeeDashboard() {
                 </div>
               </Card>
             </div>
+
+            {/* Overtime Display - Shows when overtime is positive */}
+            {overtimeString && isStarted && (
+              <Card className="p-4 border-purple-200 dark:border-purple-800 bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-950/30 dark:to-violet-950/30">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50">
+                      <Timer className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-600 font-medium">Overtime Earned</p>
+                      <p className="text-2xl font-bold text-purple-700 dark:text-purple-400" data-testid="text-overtime-value">{overtimeString}</p>
+                    </div>
+                  </div>
+                  <Badge className="bg-purple-600 text-white">
+                    <Zap className="w-3 h-3 mr-1" />Extra Hours
+                  </Badge>
+                </div>
+              </Card>
+            )}
 
             {/* Report Status Cards */}
             {isActive && !hasSubmittedReport && (
