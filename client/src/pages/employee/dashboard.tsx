@@ -1679,12 +1679,14 @@ export default function EmployeeDashboard() {
         const start = new Date(`1970-01-01T${user.morningShiftStart}`);
         const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
+        if (diff < 0) diff += 24 * 3600; // Handle cross-midnight
         if (diff > 0) total += diff;
       }
       if (user.eveningShiftStart && user.eveningShiftEnd) {
         const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
         const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
+        if (diff < 0) diff += 24 * 3600; // Handle cross-midnight
         if (diff > 0) total += diff;
       }
       return total > 0 ? total : 8 * 3600;

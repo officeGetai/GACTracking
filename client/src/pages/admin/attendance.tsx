@@ -449,6 +449,44 @@ function extractTimeValue(datetime: string | null): string {
   }
 }
 
+// Calculate required shift hours in minutes for overtime calculation
+function calculateRequiredMinutes(user: SafeUser | null): number {
+  if (!user) return 8 * 60; // Default 8 hours
+  
+  if (user.shiftType === "open_shift") {
+    return parseFloat(user.openShiftRequiredHours || "8") * 60;
+  }
+  
+  if (user.shiftType === "one_shift" && user.shiftStartTime && user.shiftEndTime) {
+    const start = new Date(`1970-01-01T${user.shiftStartTime}`);
+    const end = new Date(`1970-01-01T${user.shiftEndTime}`);
+    let diff = (end.getTime() - start.getTime()) / 60000;
+    if (diff < 0) diff += 24 * 60; // Handle cross-midnight
+    return diff;
+  }
+  
+  if (user.shiftType === "two_shifts") {
+    let total = 0;
+    if (user.morningShiftStart && user.morningShiftEnd) {
+      const start = new Date(`1970-01-01T${user.morningShiftStart}`);
+      const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
+      let diff = (end.getTime() - start.getTime()) / 60000;
+      if (diff < 0) diff += 24 * 60; // Handle cross-midnight
+      if (diff > 0) total += diff;
+    }
+    if (user.eveningShiftStart && user.eveningShiftEnd) {
+      const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
+      const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
+      let diff = (end.getTime() - start.getTime()) / 60000;
+      if (diff < 0) diff += 24 * 60; // Handle cross-midnight
+      if (diff > 0) total += diff;
+    }
+    return total > 0 ? total : 8 * 60;
+  }
+  
+  return 8 * 60;
+}
+
 // Day Detail Panel
 interface DayDetailPanelProps {
   record: DayRecord | null;
@@ -456,9 +494,10 @@ interface DayDetailPanelProps {
   onDelete?: (shiftId: string) => void;
   isEditing?: boolean;
   isSaving?: boolean;
+  employee?: SafeUser | null;
 }
 
-function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDetailPanelProps) {
+function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving, employee }: DayDetailPanelProps) {
   const [editMode, setEditMode] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editValues, setEditValues] = useState({
@@ -493,6 +532,10 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
   }
 
   const netWorkMinutes = record.workMinutes - record.breakMinutes;
+  
+  // Calculate overtime: Net Work Minutes - Required Minutes (only positive = overtime)
+  const requiredMinutes = calculateRequiredMinutes(employee ?? null);
+  const overtimeMinutes = netWorkMinutes > requiredMinutes ? netWorkMinutes - requiredMinutes : 0;
 
   const handleSave = () => {
     if (!record.shift?.id || !onEdit) return;
@@ -694,7 +737,7 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
               </div>
 
               {/* Summary */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-center">
                   <Timer className="h-4 w-4 mx-auto text-slate-500 mb-1" />
                   <p className="text-sm font-bold text-slate-900 dark:text-white">{formatDuration(netWorkMinutes)}</p>
@@ -709,6 +752,21 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving }: DayDe
                   <AlertTriangle className="h-4 w-4 mx-auto text-orange-500 mb-1" />
                   <p className="text-sm font-bold text-slate-900 dark:text-white">{record.lateMinutes}m</p>
                   <p className="text-[10px] text-slate-500">Late</p>
+                </div>
+                <div className={cn(
+                  "p-2 rounded-lg text-center",
+                  overtimeMinutes > 0 
+                    ? "bg-purple-100 dark:bg-purple-950/50" 
+                    : "bg-slate-100 dark:bg-slate-800"
+                )}>
+                  <Zap className={cn("h-4 w-4 mx-auto mb-1", overtimeMinutes > 0 ? "text-purple-600" : "text-slate-400")} />
+                  <p className={cn(
+                    "text-sm font-bold",
+                    overtimeMinutes > 0 ? "text-purple-700 dark:text-purple-300" : "text-slate-400 dark:text-slate-500"
+                  )} data-testid="text-overtime-admin">
+                    {overtimeMinutes > 0 ? formatDuration(overtimeMinutes) : "—"}
+                  </p>
+                  <p className="text-[10px] text-slate-500">Overtime</p>
                 </div>
               </div>
             </>
@@ -1420,6 +1478,7 @@ export default function AttendancePage() {
                     onEdit={handleEditShift}
                     onDelete={handleDeleteShift}
                     isSaving={editShiftMutation.isPending || deleteShiftMutation.isPending || deleteAbsentMutation.isPending}
+                    employee={selectedEmployee}
                   />
                 </div>
               </div>
