@@ -707,6 +707,81 @@ export default function SpecialRequestPage() {
                           </div>
                         </div>
 
+                        {/* Request Dates - Always show if dates exist */}
+                        {selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates) && selectedRequest.requestDates.length > 0 && (
+                          <div className={cn(
+                            "rounded-xl p-4 border",
+                            selectedRequest.status === "approved" 
+                              ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800"
+                              : selectedRequest.status === "not_approved"
+                              ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                              : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                          )}>
+                            <div className="flex items-center gap-2 mb-3">
+                              <CalendarDays className={cn(
+                                "h-4 w-4",
+                                selectedRequest.status === "approved" 
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : selectedRequest.status === "not_approved"
+                                  ? "text-red-600 dark:text-red-400"
+                                  : "text-blue-600 dark:text-blue-400"
+                              )} />
+                              <span className={cn(
+                                "text-sm font-medium",
+                                selectedRequest.status === "approved" 
+                                  ? "text-emerald-900 dark:text-emerald-100"
+                                  : selectedRequest.status === "not_approved"
+                                  ? "text-red-900 dark:text-red-100"
+                                  : "text-blue-900 dark:text-blue-100"
+                              )}>
+                                {selectedRequest.status === "approved" 
+                                  ? "Approved Leave Dates" 
+                                  : selectedRequest.status === "not_approved"
+                                  ? "Rejected Leave Dates"
+                                  : "Requested Leave Dates"}
+                              </span>
+                              {selectedRequest.status === "approved" && (
+                                <Badge className="text-[10px] ml-auto bg-emerald-500">
+                                  Approved
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            <div className="space-y-2">
+                              {(selectedRequest.requestDates as Array<{date: string, shiftType: string}>).map((item, index) => (
+                                <div
+                                  key={index}
+                                  className={cn(
+                                    "flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-slate-900 border text-sm",
+                                    selectedRequest.status === "approved" 
+                                      ? "border-emerald-100 dark:border-emerald-800"
+                                      : selectedRequest.status === "not_approved"
+                                      ? "border-red-100 dark:border-red-800"
+                                      : "border-blue-100 dark:border-blue-800"
+                                  )}
+                                >
+                                  <Calendar className={cn(
+                                    "w-3.5 h-3.5",
+                                    selectedRequest.status === "approved" 
+                                      ? "text-emerald-500"
+                                      : selectedRequest.status === "not_approved"
+                                      ? "text-red-500"
+                                      : "text-blue-500"
+                                  )} />
+                                  <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
+                                  <span className="text-slate-400">-</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {item.shiftType === "morning" ? "Morning Shift" 
+                                      : item.shiftType === "evening" ? "Evening Shift"
+                                      : item.shiftType === "both" ? "Both Shifts"
+                                      : "Complete Shift"}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Comments */}
                         {commentsLoading ? (
                           <div className="flex justify-center py-8">

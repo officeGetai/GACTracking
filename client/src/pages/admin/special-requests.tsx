@@ -887,55 +887,108 @@ export default function AdminSpecialRequestsPage() {
                         </div>
                       </div>
 
-                      {/* Request Dates Section */}
-                      {(editedRequestDates.length > 0 || selectedRequest.status === "sent_for_approval") && (
-                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-800">
+                      {/* Request Dates Section - Always show if dates exist or request is pending */}
+                      {(editedRequestDates.length > 0 || selectedRequest.status === "sent_for_approval" || (selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates) && selectedRequest.requestDates.length > 0)) && (
+                        <div className={cn(
+                          "rounded-xl p-4 border",
+                          selectedRequest.status === "approved" 
+                            ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800"
+                            : selectedRequest.status === "not_approved"
+                            ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                            : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                        )}>
                           <div className="flex items-center gap-2 mb-3">
-                            <CalendarDays className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                              Request Dates
+                            <CalendarDays className={cn(
+                              "h-4 w-4",
+                              selectedRequest.status === "approved" 
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : selectedRequest.status === "not_approved"
+                                ? "text-red-600 dark:text-red-400"
+                                : "text-blue-600 dark:text-blue-400"
+                            )} />
+                            <span className={cn(
+                              "text-sm font-medium",
+                              selectedRequest.status === "approved" 
+                                ? "text-emerald-900 dark:text-emerald-100"
+                                : selectedRequest.status === "not_approved"
+                                ? "text-red-900 dark:text-red-100"
+                                : "text-blue-900 dark:text-blue-100"
+                            )}>
+                              {selectedRequest.status === "approved" 
+                                ? "Approved Leave Dates" 
+                                : selectedRequest.status === "not_approved"
+                                ? "Rejected Leave Dates"
+                                : "Requested Leave Dates"}
                             </span>
                             {selectedRequest.status === "sent_for_approval" && (
                               <Badge variant="secondary" className="text-[10px] ml-auto">
                                 Editable
                               </Badge>
                             )}
+                            {selectedRequest.status === "approved" && (
+                              <Badge className="text-[10px] ml-auto bg-emerald-500">
+                                Approved
+                              </Badge>
+                            )}
                           </div>
                           
                           {/* Display dates list */}
-                          {editedRequestDates.length > 0 ? (
-                            <div className="space-y-2 mb-3">
-                              {editedRequestDates.map((item, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-800"
-                                >
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                                    <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
-                                    <span className="text-slate-400">-</span>
-                                    <Badge variant="outline" className="text-xs">
-                                      {getShiftLabel(item.shiftType)}
-                                    </Badge>
+                          {(() => {
+                            // Use editedRequestDates for pending, or the original requestDates for approved/rejected
+                            const datesToShow = selectedRequest.status === "sent_for_approval" 
+                              ? editedRequestDates 
+                              : (selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates) 
+                                  ? selectedRequest.requestDates as Array<{date: string, shiftType: string}> 
+                                  : []);
+                            
+                            return datesToShow.length > 0 ? (
+                              <div className="space-y-2 mb-3">
+                                {datesToShow.map((item, index) => (
+                                  <div
+                                    key={index}
+                                    className={cn(
+                                      "flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border",
+                                      selectedRequest.status === "approved" 
+                                        ? "border-emerald-100 dark:border-emerald-800"
+                                        : selectedRequest.status === "not_approved"
+                                        ? "border-red-100 dark:border-red-800"
+                                        : "border-blue-100 dark:border-blue-800"
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <Calendar className={cn(
+                                        "w-3.5 h-3.5",
+                                        selectedRequest.status === "approved" 
+                                          ? "text-emerald-500"
+                                          : selectedRequest.status === "not_approved"
+                                          ? "text-red-500"
+                                          : "text-blue-500"
+                                      )} />
+                                      <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
+                                      <span className="text-slate-400">-</span>
+                                      <Badge variant="outline" className="text-xs">
+                                        {getShiftLabel(item.shiftType)}
+                                      </Badge>
+                                    </div>
+                                    {selectedRequest.status === "sent_for_approval" && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-red-500"
+                                        onClick={() => removeEditedDate(index)}
+                                        data-testid={`button-remove-admin-date-${index}`}
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </Button>
+                                    )}
                                   </div>
-                                  {selectedRequest.status === "sent_for_approval" && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                      onClick={() => removeEditedDate(index)}
-                                      data-testid={`button-remove-admin-date-${index}`}
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </Button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-500 mb-3">No dates specified</p>
-                          )}
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-500 mb-3">No dates specified</p>
+                            );
+                          })()}
                           
                           {/* Add new date (only for pending requests) */}
                           {selectedRequest.status === "sent_for_approval" && (
