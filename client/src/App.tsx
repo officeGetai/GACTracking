@@ -39,7 +39,8 @@ import SettingsPage from "@/pages/admin/settings";
 import AdminDailyReportsPage from "@/pages/admin/daily-reports";
 import AdminSpecialRequestsPage from "@/pages/admin/special-requests";
 import AdminArchivePage from "@/pages/admin/archive";
-import AdminTargetBoard from "@/pages/admin/targets"; // ← ADD THIS
+import AdminTargetBoard from "@/pages/admin/targets";
+import AdminShiftControl from "@/pages/admin/shift-control"; // ← ADD THIS
 
 // Employee Imports
 import EmployeeDashboard from "@/pages/employee/dashboard";
@@ -58,7 +59,7 @@ function ProtectedRoute({
   requiredRole,
 }: {
   children: React.ReactNode;
-  requiredRole?: "admin" | "employee";
+  requiredRole?: "admin" | "employee" | "superadmin";
 }) {
   const { user, isLoading } = useAuth();
 
@@ -70,8 +71,18 @@ function ProtectedRoute({
     return <Redirect to="/" />;
   }
 
+  // Admin and Superadmin can access each other's routes if they are for 'admin' tasks
+  const isAdmin = user.role === "admin" || user.role === "superadmin";
+  const targetRoleIsAdmin = requiredRole === "admin" || requiredRole === "superadmin";
+
   if (requiredRole && user.role !== requiredRole) {
-    return <Redirect to={user.role === "admin" ? "/admin" : "/employee"} />;
+    // Special exception: superadmin can access admin routes
+    if (user.role === "superadmin" && requiredRole === "admin") {
+      return <>{children}</>;
+    }
+
+    // Default fallback redirection
+    return <Redirect to={isAdmin ? "/admin" : "/employee"} />;
   }
 
   return <>{children}</>;
@@ -93,6 +104,7 @@ function DashboardHeader() {
       "/admin/special-requests": "Special Requests",
       "/admin/archive": "Archive",
       "/admin/targets": "Target Board",
+      "/admin/shift-control": "Shift Control Center",
       "/admin/notifications": "Notifications",
       "/employee": "Dashboard",
       "/employee/attendance": "My Attendance",
@@ -154,7 +166,7 @@ function DashboardHeader() {
 // Notifications Dropdown Component
 function NotificationsDropdown() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const [, setLocation] = useLocation();
 
   const { data: notifications, isLoading } = useQuery<any[]>({
@@ -284,7 +296,8 @@ function AppRoutes() {
   }
 
   if (user && location === "/") {
-    return <Redirect to={user.role === "admin" ? "/admin" : "/employee"} />;
+    const isAdmin = user.role === "admin" || user.role === "superadmin";
+    return <Redirect to={isAdmin ? "/admin" : "/employee"} />;
   }
 
   return (
@@ -353,6 +366,13 @@ function AppRoutes() {
         <ProtectedRoute requiredRole="admin">
           <DashboardLayout>
             <AdminTargetBoard />
+          </DashboardLayout>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/shift-control">
+        <ProtectedRoute requiredRole="admin">
+          <DashboardLayout>
+            <AdminShiftControl />
           </DashboardLayout>
         </ProtectedRoute>
       </Route>

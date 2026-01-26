@@ -25,6 +25,8 @@ import {
   notifyDailyReportSubmitted,
   notifyShiftReportReminder,
   notifySpecialRequestCreated,
+  notifyAdminCommentToEmployee,
+  notifyEmployeeReplyToGroup,
   sendTestMessage,
   sendPersonalWhatsApp,
   type WasenderSettings
@@ -288,12 +290,12 @@ function calculateScheduledDate(
   if (!scheduledStartTimeStr) {
     return workingDate;
   }
-  
+
   const [startHours] = scheduledStartTimeStr.split(':').map(Number);
-  
+
   // Get clock-in hour in Pakistan timezone (NOT UTC)
   const clockInHourPKT = getHourInPakistan(clockInTime);
-  
+
   // Cross-midnight detection:
   // If the scheduled start is early morning (before 6 AM)
   // AND the clock-in is in late evening (8 PM or later) in Pakistan time
@@ -307,7 +309,7 @@ function calculateScheduledDate(
     nextDay.setDate(nextDay.getDate() + 1);
     return nextDay.toISOString().split('T')[0];
   }
-  
+
   return workingDate;
 }
 
@@ -319,12 +321,13 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Middleware to check if user is admin
+// Middleware to check if user is admin or superadmin
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
-  if (req.session.role !== "admin") {
+  // Allow both admin and superadmin roles
+  if (req.session.role !== "admin" && req.session.role !== "superadmin") {
     return res.status(403).json({ error: "Forbidden - Admin access required" });
   }
   next();
@@ -590,7 +593,7 @@ async function cleanupStaleRecords(userId: string, currentWorkingDate: string): 
     for (const shift of incompleteShifts) {
       // Auto-complete shifts that weren't properly ended
       const updates: any = { status: "incomplete" };
-      
+
       // Use scheduledDate for cross-midnight shifts, fallback to shift.date for legacy records
       const baseDate = (shift as any).scheduledDate || shift.date;
 
@@ -713,7 +716,10 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid username or password" });
       }
 
-      if (user.role !== data.role) {
+      // Role matching - allow superadmin to login as admin
+      const isRoleMatch = user.role === data.role || (user.role === 'superadmin' && data.role === 'admin');
+
+      if (!isRoleMatch) {
         return res.status(401).json({ error: `This account is not registered as ${data.role}` });
       }
 
@@ -785,7 +791,8 @@ export async function registerRoutes(
   app.get("/api/bd-targets", requireAuth, async (req, res) => {
     try {
       const month = req.query.month as string;
-      const userId = req.session.role === 'admin'
+      const isAdmin = req.session.role === 'admin' || req.session.role === 'superadmin';
+      const userId = isAdmin
         ? (req.query.userId as string)
         : req.session.userId!;
 
@@ -860,11 +867,11 @@ export async function registerRoutes(
       const { shiftId } = req.params;
       console.log(`[Admin PATCH] Received request to update shift ${shiftId}`);
       console.log(`[Admin PATCH] Request body:`, JSON.stringify(req.body));
-      
-      const { 
-        morningClockIn, 
-        morningClockOut, 
-        eveningClockIn, 
+
+      const {
+        morningClockIn,
+        morningClockOut,
+        eveningClockIn,
         eveningClockOut,
         morningLateMinutes,
         eveningLateMinutes,
@@ -882,7 +889,7 @@ export async function registerRoutes(
 
       // Build update object - only include fields that are explicitly provided
       const updates: any = {};
-      
+
       // Handle morningClockIn - can be null to delete, a date string to update, or undefined to skip
       if (morningClockIn !== undefined) {
         updates.morningClockIn = morningClockIn ? new Date(morningClockIn) : null;
@@ -910,7 +917,7 @@ export async function registerRoutes(
       }
 
       console.log(`[Admin PATCH] Applying updates:`, JSON.stringify(updates));
-      
+
       // Update shift
       const updatedShift = await storage.updateShift(shiftId, updates);
       console.log(`[Admin PATCH] Updated shift result:`, JSON.stringify(updatedShift));
@@ -974,8 +981,8 @@ export async function registerRoutes(
 
       // Verify it's an absent record
       if (shift.status !== 'absent') {
-        return res.status(400).json({ 
-          error: "This is not an absent record. Only absent records can be deleted using this endpoint." 
+        return res.status(400).json({
+          error: "This is not an absent record. Only absent records can be deleted using this endpoint."
         });
       }
 
@@ -995,13 +1002,103 @@ export async function registerRoutes(
       });
 
       console.log(`[Admin] Absent record ${shiftId} deleted for ${employeeName}`);
-      res.json({ 
-        success: true, 
-        message: `Absent record deleted. ${employeeName} can now clock in.` 
+      res.json({
+        success: true,
+        message: `Absent record deleted. ${employeeName} can now clock in.`
       });
     } catch (error) {
       console.error("Failed to delete absent record:", error);
       res.status(500).json({ error: "Failed to delete absent record" });
+    }
+  });
+
+  // ============= ADMIN SHIFT CONTROL CENTER ROUTES =============
+
+  // Start shift for employee (Admin Intervention)
+  app.post("/api/admin/shifts/control/start", requireAdmin, async (req, res) => {
+    try {
+      const { userId, period, timestamp } = req.body;
+      if (!userId || !period) {
+        return res.status(400).json({ error: "User ID and period are required" });
+      }
+
+      const adminId = req.session.userId!;
+      const adminUser = await storage.getUser(adminId);
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) return res.status(404).json({ error: "Employee not found" });
+
+      const startTime = timestamp ? new Date(timestamp) : new Date();
+      const shift = await storage.adminStartShift(userId, period, startTime);
+
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "admin_shift_start",
+        details: `[Intervention] ${adminUser!.firstName} started ${period} shift for ${targetUser.firstName} ${targetUser.lastName}`,
+        timestamp: new Date(),
+      });
+
+      res.json(shift);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Resume paused/closed shift (Admin Intervention)
+  app.post("/api/admin/shifts/control/resume", requireAdmin, async (req, res) => {
+    try {
+      const { shiftId, period } = req.body;
+      if (!shiftId || !period) {
+        return res.status(400).json({ error: "Shift ID and period are required" });
+      }
+
+      const adminId = req.session.userId!;
+      const adminUser = await storage.getUser(adminId);
+      const shift = await storage.getShiftById(shiftId);
+      if (!shift) return res.status(404).json({ error: "Shift not found" });
+
+      const targetUser = await storage.getUser(shift.userId);
+      const updatedShift = await storage.adminResumeShift(shiftId, period);
+
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "admin_shift_resume",
+        details: `[Intervention] ${adminUser!.firstName} resumed ${period} shift for ${targetUser?.firstName || 'User'}`,
+        timestamp: new Date(),
+      });
+
+      res.json(updatedShift);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Force close shift (Admin Intervention)
+  app.post("/api/admin/shifts/control/force-close", requireAdmin, async (req, res) => {
+    try {
+      const { shiftId, period, timestamp } = req.body;
+      if (!shiftId || !period) {
+        return res.status(400).json({ error: "Shift ID and period are required" });
+      }
+
+      const adminId = req.session.userId!;
+      const adminUser = await storage.getUser(adminId);
+      const shift = await storage.getShiftById(shiftId);
+      if (!shift) return res.status(404).json({ error: "Shift not found" });
+
+      const targetUser = await storage.getUser(shift.userId);
+      const endTime = timestamp ? new Date(timestamp) : new Date();
+      const updatedShift = await storage.adminCloseShift(shiftId, period, endTime);
+
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "admin_shift_force_close",
+        details: `[Intervention] ${adminUser!.firstName} forced closure of ${period} shift for ${targetUser?.firstName || 'User'}`,
+        timestamp: new Date(),
+      });
+
+      res.json(updatedShift);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -1058,6 +1155,11 @@ export async function registerRoutes(
 
       // Clean and prepare data
       const cleanedData = cleanEmployeeData(req.body);
+
+      // Check privilege: Only superadmin can create superadmin
+      if (cleanedData.role === 'superadmin' && req.session.role !== 'superadmin') {
+        return res.status(403).json({ error: "Only Super Admin can create other Super Admin accounts" });
+      }
 
       // Hash password
       const hashedPassword = await bcrypt.hash(req.body.password, SALT_ROUNDS);
@@ -1135,6 +1237,16 @@ export async function registerRoutes(
       // Clean and prepare data
       const cleanedData = cleanEmployeeData(req.body);
 
+      // Check if trying to update a superadmin account
+      if (existingUser.role === 'superadmin' && req.session.role !== 'superadmin') {
+        return res.status(403).json({ error: "Only Super Admin can modify other Super Admin accounts" });
+      }
+
+      // Check if trying to change role to superadmin
+      if (cleanedData.role === 'superadmin' && req.session.role !== 'superadmin') {
+        return res.status(403).json({ error: "Only Super Admin can assign the Super Admin role" });
+      }
+
       // Handle password - remove if empty, otherwise hash it
       if (cleanedData.password && cleanedData.password.trim() !== '') {
         cleanedData.password = await bcrypt.hash(cleanedData.password, SALT_ROUNDS);
@@ -1186,7 +1298,26 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Cannot delete your own account" });
       }
 
+      // Check if target user is a superadmin - cannot be deleted by anyone
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (targetUser.role === "superadmin") {
+        return res.status(403).json({ error: "Cannot delete super administrator account" });
+      }
+
       await storage.deleteUser(id);
+
+      // Log the deletion
+      await storage.createActivityLog({
+        userId: req.session.userId!,
+        action: "user_deleted",
+        details: `Deleted user: ${targetUser.username} (${targetUser.firstName} ${targetUser.lastName})`,
+        timestamp: new Date()
+      });
+
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to delete employee:", error);
@@ -1480,7 +1611,7 @@ export async function registerRoutes(
           const pktDateStr = getDateInPakistan(now);
           const currentHourPKT = getHourInPakistan(now);
           const [schedHour] = scheduledStartStr.split(':').map(Number);
-          
+
           // Determine the correct date for the scheduled start:
           // If current time is in late evening (20-24) and shift starts in early morning (0-6),
           // the shift is for TOMORROW, use today's date for comparison
@@ -1492,7 +1623,7 @@ export async function registerRoutes(
             const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
             scheduledDateStr = getDateInPakistan(tomorrow);
           }
-          
+
           // Create scheduled start time in Pakistan timezone
           const scheduledStart = parseUserTime(scheduledDateStr, scheduledStartStr);
           const earliestStart = subHours(scheduledStart, 2);
@@ -1763,7 +1894,7 @@ export async function registerRoutes(
           const pktDateStr = getDateInPakistan(now);
           const currentHourPKT = getHourInPakistan(now);
           const [schedHour] = scheduledStartStr.split(':').map(Number);
-          
+
           // Determine the correct date for the scheduled start:
           // If current time is in early morning (0-6 AM) and shift starts in evening (18-24),
           // the shift started YESTERDAY, not today
@@ -1773,7 +1904,7 @@ export async function registerRoutes(
             const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
             scheduledDateStr = getDateInPakistan(yesterday);
           }
-          
+
           // Create scheduled start time in Pakistan timezone
           const scheduledStart = parseUserTime(scheduledDateStr, scheduledStartStr);
           const earliestStart = subHours(scheduledStart, 2);
@@ -2267,7 +2398,7 @@ export async function registerRoutes(
       const userId = req.session.userId!;
       const limit = parseInt(req.query.limit as string) || 30;
       const shifts = await storage.getShiftsByUser(userId, limit);
-      
+
       // Include breaks for each shift to calculate net working hours
       const shiftsWithBreaks = await Promise.all(
         shifts.map(async (shift) => {
@@ -2275,7 +2406,7 @@ export async function registerRoutes(
           return { ...shift, breaks: shiftBreaks };
         })
       );
-      
+
       res.json(shiftsWithBreaks);
     } catch (error) {
       console.error("Failed to fetch shifts:", error);
@@ -2724,8 +2855,8 @@ export async function registerRoutes(
       // ============================================
       if (user.shiftType === 'two_shifts') {
         if (!requestShiftType || !['morning', 'evening'].includes(requestShiftType)) {
-          return res.status(400).json({ 
-            error: "Please specify the shift type (morning or evening) for your report" 
+          return res.status(400).json({
+            error: "Please specify the shift type (morning or evening) for your report"
           });
         }
       }
@@ -2928,7 +3059,8 @@ export async function registerRoutes(
 
       // Check if user owns this report or is admin
       const user = await storage.getUser(userId);
-      if (report.userId !== userId && user?.role !== 'admin') {
+      const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+      if (report.userId !== userId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view this report" });
       }
 
@@ -2969,7 +3101,7 @@ export async function registerRoutes(
   app.delete("/api/admin/reports/daily/:id", requireAdmin, async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       // Verify report exists
       const report = await storage.getDailyShiftReport(id);
       if (!report) {
@@ -2977,7 +3109,7 @@ export async function registerRoutes(
       }
 
       await storage.deleteDailyShiftReport(id);
-      
+
       // Log the action
       const adminId = req.session.userId!;
       await storage.createActivityLog({
@@ -3135,7 +3267,7 @@ export async function registerRoutes(
 
       // If approved, mark employee as absent for the specified dates
       if (status === "approved" && request.requestDates && Array.isArray(request.requestDates)) {
-        for (const dateEntry of request.requestDates as Array<{date: string, shiftType: string}>) {
+        for (const dateEntry of request.requestDates as Array<{ date: string, shiftType: string }>) {
           try {
             // Mark the employee as absent for this date/shift
             await storage.markEmployeeAbsent(request.userId, dateEntry.date, dateEntry.shiftType);
@@ -3155,18 +3287,18 @@ export async function registerRoutes(
 
       // Send WhatsApp notification to employee when status changes
       if (employee && employee.phone) {
-        const statusLabel = status === "approved" ? "Approved" : 
-                           status === "not_approved" ? "Rejected" : 
-                           status === "revision" ? "Revision Requested" : status;
-        
+        const statusLabel = status === "approved" ? "Approved" :
+          status === "not_approved" ? "Rejected" :
+            status === "revision" ? "Revision Requested" : status;
+
         // Format dates for message
         let datesText = "Not specified";
         if (request.requestDates && Array.isArray(request.requestDates)) {
-          datesText = (request.requestDates as Array<{date: string, shiftType: string}>)
+          datesText = (request.requestDates as Array<{ date: string, shiftType: string }>)
             .map(d => {
               const shiftLabel = d.shiftType === "morning" ? "Morning Shift" :
-                                d.shiftType === "evening" ? "Evening Shift" :
-                                d.shiftType === "both" ? "Both Shifts" : "Complete Shift";
+                d.shiftType === "evening" ? "Evening Shift" :
+                  d.shiftType === "both" ? "Both Shifts" : "Complete Shift";
               return `  • ${d.date} - ${shiftLabel}`;
             })
             .join("\n");
@@ -3212,7 +3344,7 @@ ${datesText}
     try {
       const requestId = req.params.id;
       const userId = req.session.userId!;
-      const isAdmin = req.session.role === "admin";
+      const isAdmin = req.session.role === "admin" || req.session.role === "superadmin";
       const { comment, statusChange } = req.body;
 
       if (!comment || comment.trim() === '') {
@@ -3255,6 +3387,51 @@ ${datesText}
       // Fetch comment with user info
       const commentWithUser = await storage.getRequestCommentWithUser(newComment.id);
 
+      // ============================================================
+      // SEND WHATSAPP NOTIFICATIONS FOR CONVERSATION
+      // ============================================================
+      try {
+        const settings = await getWasenderSettings();
+
+        if (isAdmin) {
+          // Admin added a comment → Notify the employee personally
+          const employee = await storage.getUser(request.userId);
+          const adminUser = await storage.getUser(userId);
+          const adminName = adminUser ? `${adminUser.firstName} ${adminUser.lastName}` : "Admin";
+
+          if (employee && employee.phone) {
+            notifyAdminCommentToEmployee(
+              employee.phone,
+              `${employee.firstName} ${employee.lastName}`,
+              request.title,
+              adminName,
+              comment.trim(),
+              statusChange || null,
+              settings
+            ).catch(err => console.error("WhatsApp admin comment notification error:", err));
+          }
+        } else {
+          // Employee added a reply → Notify the requests group
+          const employee = await storage.getUser(userId);
+          if (employee) {
+            notifyEmployeeReplyToGroup(
+              {
+                fullName: `${employee.firstName} ${employee.lastName}`,
+                department: employee.department || "Not Assigned",
+                phone: employee.phone,
+                whatsappPreference: employee.whatsappPreference
+              },
+              request.title,
+              comment.trim(),
+              settings
+            ).catch(err => console.error("WhatsApp employee reply notification error:", err));
+          }
+        }
+      } catch (notifyError) {
+        console.error("Failed to send conversation WhatsApp notification:", notifyError);
+        // Don't fail the request if notification fails
+      }
+
       res.json(commentWithUser || newComment);
     } catch (error) {
       console.error("Failed to add comment:", error);
@@ -3267,7 +3444,7 @@ ${datesText}
     try {
       const requestId = req.params.id;
       const userId = req.session.userId!;
-      const isAdmin = req.session.role === "admin";
+      const isAdmin = req.session.role === "admin" || req.session.role === "superadmin";
 
       // Check if request exists
       const request = await storage.getSpecialRequest(requestId);

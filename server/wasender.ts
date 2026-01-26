@@ -203,7 +203,7 @@ async function sendNotification(
           shouldSendToIndividual = (notificationType === "report" || notificationType === "break");
           break;
       }
-      
+
       if (!shouldSendToIndividual) {
         console.log(`[Personal DM] Skipping ${notificationType} END for ${employee.fullName} - preference is "${preference}"`);
       }
@@ -417,6 +417,97 @@ ${details.substring(0, 300)}${details.length > 300 ? '...' : ''}
   await sendNotification(message, employee, settings, "request", false);
 }
 
+/**
+ * Notify employee when admin adds a comment to their special request
+ * Sends directly to employee's personal WhatsApp number
+ */
+export async function notifyAdminCommentToEmployee(
+  employeePhone: string,
+  employeeName: string,
+  requestTitle: string,
+  adminName: string,
+  comment: string,
+  statusChange: string | null,
+  settings: WasenderSettings
+): Promise<void> {
+  if (!settings.apiToken || !settings.isActive) {
+    console.log("WASENDER not configured or not active, skipping admin comment notification.");
+    return;
+  }
+
+  const now = getPakistanTime();
+
+  let statusText = "";
+  if (statusChange) {
+    const statusLabel = statusChange === "approved" ? "✅ Approved" :
+      statusChange === "not_approved" ? "❌ Rejected" :
+        statusChange === "revision" ? "🔄 Revision Requested" :
+          statusChange === "resolved" ? "✔️ Resolved" : statusChange;
+    statusText = `\n📋 Status Updated: ${statusLabel}`;
+  }
+
+  const message = `💬 *ADMIN RESPONSE - SPECIAL REQUEST*
+
+📌 Request: ${requestTitle}
+👤 Admin: ${adminName}
+🕐 Time: ${formatTime(now)}
+${statusText}
+
+📝 *Comment:*
+${comment.substring(0, 400)}${comment.length > 400 ? '...' : ''}
+
+👉 View full conversation in the GAC Tracking app.`;
+
+  try {
+    await sendToTarget(employeePhone, message, settings.apiToken);
+    console.log(`Admin comment notification sent to employee: ${employeeName}`);
+  } catch (error) {
+    console.error(`Failed to send admin comment notification to ${employeeName}:`, error);
+  }
+}
+
+/**
+ * Notify requests group when employee adds a reply to their special request
+ * Sends to the requests WhatsApp group
+ */
+export async function notifyEmployeeReplyToGroup(
+  employee: Employee,
+  requestTitle: string,
+  comment: string,
+  settings: WasenderSettings
+): Promise<void> {
+  if (!settings.apiToken || !settings.isActive) {
+    console.log("WASENDER not configured or not active, skipping employee reply notification.");
+    return;
+  }
+
+  if (!settings.requestsGroupId) {
+    console.log("No requests group ID configured, skipping employee reply notification.");
+    return;
+  }
+
+  const now = getPakistanTime();
+
+  const message = `💬 *EMPLOYEE REPLY - SPECIAL REQUEST*
+
+👤 Employee: ${employee.fullName}
+🏢 Department: ${employee.department}
+📌 Request: ${requestTitle}
+🕐 Time: ${formatTime(now)}
+
+📝 *Reply:*
+${comment.substring(0, 400)}${comment.length > 400 ? '...' : ''}
+
+👉 Review in admin portal.`;
+
+  try {
+    await sendToTarget(settings.requestsGroupId, message, settings.apiToken);
+    console.log(`Employee reply notification sent to requests group for: ${employee.fullName}`);
+  } catch (error) {
+    console.error(`Failed to send employee reply notification to group:`, error);
+  }
+}
+
 // --- NEW FUNCTION FOR SCHEDULER REMINDER ---
 export async function notifyShiftReportReminder(
   user: { fullName: string; phone: string | null; whatsappPreference: string | null },
@@ -543,7 +634,7 @@ export async function sendPersonalWhatsApp(
 
   // Clean phone number (remove spaces, dashes, etc)
   const cleanPhone = phone.replace(/[\s\-\(\)]/g, "");
-  
+
   try {
     return await sendToTarget(cleanPhone, message, settings.apiToken);
   } catch (error) {

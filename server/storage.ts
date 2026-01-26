@@ -127,6 +127,11 @@ export interface IStorage {
   getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]>;
   getActiveShiftsNeedingClosure(): Promise<(Shift & { user: User })[]>;
 
+  // Admin Shift Control methods
+  adminStartShift(userId: string, period: "morning" | "evening", timestamp: Date): Promise<Shift>;
+  adminResumeShift(shiftId: string, period: "morning" | "evening"): Promise<Shift>;
+  adminCloseShift(shiftId: string, period: "morning" | "evening", timestamp: Date): Promise<Shift>;
+
   // Break methods
   getBreakById(id: string): Promise<Break | undefined>;
   createBreak(breakRecord: InsertBreak): Promise<Break>;
@@ -220,13 +225,13 @@ export interface IStorage {
   // Incomplete shifts
   getIncompleteShiftsBeforeDate(userId: string, beforeDate: string): Promise<Shift[]>;
   getOrCreateShiftForDate(userId: string, date: string): Promise<Shift>;
-  
+
   // Mark employee as absent for approved leave requests
   markEmployeeAbsent(userId: string, date: string, shiftType: string): Promise<void>;
-  
+
   // Get all employees with scheduled shifts (one_shift or two_shifts, not open)
   getScheduledShiftEmployees(): Promise<SafeUser[]>;
-  
+
   // Delete absent record to allow employee to start shift
   deleteAbsentRecord(shiftId: string): Promise<void>;
 
@@ -556,6 +561,9 @@ export class DatabaseStorage implements IStorage {
           eveningLateMinutes: shifts.eveningLateMinutes,
           status: shifts.status,
           notes: shifts.notes,
+          scheduledDate: shifts.scheduledDate,
+          lastOvertimeExtension: shifts.lastOvertimeExtension,
+          overtimeReminderCount: shifts.overtimeReminderCount,
           createdAt: shifts.createdAt,
           user: {
             id: users.id,
@@ -667,6 +675,9 @@ export class DatabaseStorage implements IStorage {
         eveningLateMinutes: shifts.eveningLateMinutes,
         status: shifts.status,
         notes: shifts.notes,
+        scheduledDate: shifts.scheduledDate,
+        lastOvertimeExtension: shifts.lastOvertimeExtension,
+        overtimeReminderCount: shifts.overtimeReminderCount,
         createdAt: shifts.createdAt,
         user: {
           id: users.id,
@@ -716,6 +727,65 @@ export class DatabaseStorage implements IStorage {
     return shiftsWithBreaks as (Shift & { user: SafeUser; breaks: Break[] })[];
   }
 
+  async adminStartShift(userId: string, period: "morning" | "evening", timestamp: Date): Promise<Shift> {
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(timestamp);
+
+    let shift = await this.getShiftByUserAndDate(userId, today);
+
+    if (!shift) {
+      const [newShift] = await db.insert(shifts).values({
+        userId,
+        date: today,
+        [period === "morning" ? "morningClockIn" : "eveningClockIn"]: timestamp,
+        status: "present",
+      }).returning();
+      return newShift;
+    } else {
+      const updateData: any = {
+        [period === "morning" ? "morningClockIn" : "eveningClockIn"]: timestamp,
+        status: "present",
+      };
+      // Clear previous clock out if rewriting clock in
+      updateData[period === "morning" ? "morningClockOut" : "eveningClockOut"] = null;
+
+      const [updatedShift] = await db.update(shifts)
+        .set(updateData)
+        .where(eq(shifts.id, shift.id))
+        .returning();
+      return updatedShift;
+    }
+  }
+
+  async adminResumeShift(shiftId: string, period: "morning" | "evening"): Promise<Shift> {
+    const [updatedShift] = await db.update(shifts)
+      .set({
+        [period === "morning" ? "morningClockOut" : "eveningClockOut"]: null,
+        status: "present",
+      })
+      .where(eq(shifts.id, shiftId))
+      .returning();
+
+    if (!updatedShift) throw new Error("Shift not found");
+    return updatedShift;
+  }
+
+  async adminCloseShift(shiftId: string, period: "morning" | "evening", timestamp: Date): Promise<Shift> {
+    const [updatedShift] = await db.update(shifts)
+      .set({
+        [period === "morning" ? "morningClockOut" : "eveningClockOut"]: timestamp,
+      })
+      .where(eq(shifts.id, shiftId))
+      .returning();
+
+    if (!updatedShift) throw new Error("Shift not found");
+    return updatedShift;
+  }
+
   async getIncompleteShiftsBeforeDate(userId: string, beforeDate: string): Promise<Shift[]> {
     return await db
       .select()
@@ -752,7 +822,7 @@ export class DatabaseStorage implements IStorage {
 
     return shift;
   }
-  
+
   /**
    * Mark an employee as absent for a specific date and shift type
    * Used when special leave requests are approved
@@ -760,7 +830,7 @@ export class DatabaseStorage implements IStorage {
   async markEmployeeAbsent(userId: string, date: string, shiftType: string): Promise<void> {
     // Get or create a shift record for this date
     let shift = await this.getShiftByUserAndDate(userId, date);
-    
+
     if (!shift) {
       // Create a new shift record marked as absent
       shift = await this.createShift({
@@ -775,13 +845,13 @@ export class DatabaseStorage implements IStorage {
       const existingNotes = shift.notes || "";
       const newNote = `Approved leave - ${shiftType}`;
       const updatedNotes = existingNotes ? `${existingNotes}; ${newNote}` : newNote;
-      
+
       await this.updateShift(shift.id, {
         status: "absent",
         notes: updatedNotes,
       });
     }
-    
+
     console.log(`Marked ${userId} as absent on ${date} for ${shiftType}`);
   }
 
@@ -837,6 +907,8 @@ export class DatabaseStorage implements IStorage {
         status: shifts.status,
         notes: shifts.notes,
         overtimeNotificationSent: shifts.overtimeNotificationSent,
+        lastOvertimeExtension: shifts.lastOvertimeExtension,
+        overtimeReminderCount: shifts.overtimeReminderCount,
         createdAt: shifts.createdAt,
         // Include full user object for configuration access
         user: users
@@ -876,17 +948,25 @@ export class DatabaseStorage implements IStorage {
 
   async getAllMonitorableBreaks(): Promise<(Break & { user: SafeUser })[]> {
     const activeBreaks = await db
-      .select()
+      .select({
+        id: breaks.id,
+        userId: breaks.userId,
+        shiftId: breaks.shiftId,
+        date: breaks.date,
+        type: breaks.type,
+        shiftPeriod: breaks.shiftPeriod,
+        startTime: breaks.startTime,
+        endTime: breaks.endTime,
+        durationMinutes: breaks.durationMinutes,
+        lateNotificationSent: breaks.lateNotificationSent,
+        createdAt: breaks.createdAt,
+        user: getSafeUserSelectFields()
+      })
       .from(breaks)
+      .innerJoin(users, eq(breaks.userId, users.id))
       .where(isNull(breaks.endTime));
 
-    // Fetch users for these breaks to get phone numbers
-    const breaksWithUsers = await Promise.all(activeBreaks.map(async (b) => {
-      const user = await this.getUser(b.userId);
-      return { ...b, user: user as SafeUser };
-    }));
-
-    return breaksWithUsers;
+    return activeBreaks as (Break & { user: SafeUser })[];
   }
 
   async getBreaksByUserAndDate(userId: string, date: string): Promise<Break[]> {
@@ -1355,12 +1435,22 @@ export class DatabaseStorage implements IStorage {
       .from(shifts)
       .where(eq(shifts.date, today));
 
+    // Batch fetch active breaks for today
+    const activeBreaks = await db
+      .select()
+      .from(breaks)
+      .where(and(
+        eq(breaks.date, today),
+        isNull(breaks.endTime)
+      ));
+
+    const onBreakUserIds = new Set(activeBreaks.map(b => b.userId));
+
     let activeWorking = 0;
     let onBreak = 0;
 
     for (const shift of todayShifts) {
-      const activeBreak = await this.getActiveBreak(shift.userId);
-      if (activeBreak) {
+      if (onBreakUserIds.has(shift.userId)) {
         onBreak++;
       } else if (shift.morningClockIn || shift.eveningClockIn) {
         activeWorking++;
@@ -2205,6 +2295,8 @@ export class DatabaseStorage implements IStorage {
         status: shifts.status,
         notes: shifts.notes,
         overtimeNotificationSent: shifts.overtimeNotificationSent,
+        lastOvertimeExtension: shifts.lastOvertimeExtension,
+        overtimeReminderCount: shifts.overtimeReminderCount,
         createdAt: shifts.createdAt,
         user: getSafeUserSelectFields()
       })
@@ -2226,7 +2318,7 @@ export class DatabaseStorage implements IStorage {
 
   async forceCloseActiveShiftsAndBreaks(): Promise<number> {
     const now = new Date();
-    
+
     // Get Pakistan time for date calculations (UTC+5)
     const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
     const pakistanTime = new Date(utcTime + (5 * 60 * 60000));
@@ -2240,7 +2332,7 @@ export class DatabaseStorage implements IStorage {
 
     // Close Morning Shifts
     const morningResult = await db.update(shifts)
-      .set({ 
+      .set({
         morningClockOut: now,
         status: "incomplete",
         notes: sql`COALESCE(${shifts.notes}, '') || '\n[System] Auto-closed at 9 AM - Incomplete shift'`
@@ -2256,7 +2348,7 @@ export class DatabaseStorage implements IStorage {
 
     // Close Evening Shifts
     const eveningResult = await db.update(shifts)
-      .set({ 
+      .set({
         eveningClockOut: now,
         status: "incomplete",
         notes: sql`COALESCE(${shifts.notes}, '') || '\n[System] Auto-closed at 9 AM - Incomplete shift'`

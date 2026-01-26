@@ -66,18 +66,52 @@ app.use((req, res, next) => {
 
 async function ensureAdminExists() {
   try {
+    // Check if superadmin exists (by username 'superadmin' or role 'superadmin')
+    const existingSuperAdmin = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, "superadmin"))
+      .limit(1);
+
+    const hashedPassword = await bcrypt.hash("superadmin123", 10);
+
+    if (existingSuperAdmin.length === 0) {
+      // Create the superadmin user
+      await db.insert(users).values({
+        username: "superadmin",
+        password: hashedPassword,
+        firstName: "Super",
+        lastName: "Administrator",
+        email: "superadmin@gactrackings.com",
+        role: "superadmin",
+        department: "Administration",
+        position: "Super Admin",
+        isActive: true,
+      });
+      log("Default superadmin user created (superadmin/superadmin123)");
+    } else {
+      // Ensure the superadmin role is set correctly and password is reset
+      await db.update(users)
+        .set({
+          password: hashedPassword,
+          role: "superadmin"
+        })
+        .where(eq(users.username, "superadmin"));
+      log("Superadmin password reset to default");
+    }
+
+    // Also ensure the legacy admin user exists for backward compatibility
     const existingAdmin = await db
       .select()
       .from(users)
       .where(eq(users.username, "admin"))
       .limit(1);
 
-    const hashedPassword = await bcrypt.hash("admin123", 10);
-
     if (existingAdmin.length === 0) {
+      const adminHashedPassword = await bcrypt.hash("admin123", 10);
       await db.insert(users).values({
         username: "admin",
-        password: hashedPassword,
+        password: adminHashedPassword,
         firstName: "System",
         lastName: "Administrator",
         email: "admin@gactrackings.com",
@@ -87,12 +121,6 @@ async function ensureAdminExists() {
         isActive: true,
       });
       log("Default admin user created (admin/admin123)");
-    } else {
-      // Always update password to ensure it matches
-      await db.update(users)
-        .set({ password: hashedPassword })
-        .where(eq(users.username, "admin"));
-      log("Admin password reset to default");
     }
   } catch (error) {
     console.error("Failed to ensure admin exists:", error);

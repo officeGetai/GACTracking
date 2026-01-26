@@ -26,6 +26,7 @@ import {
   Phone,
   MapPin,
   Briefcase,
+  Zap,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { SafeUser } from "@shared/schema";
 import { DEPARTMENTS } from "@shared/schema";
@@ -152,7 +154,7 @@ const baseEmployeeFields = {
   email: z.string().email("Invalid email").optional().or(z.literal("")),
   department: z.string().optional(),
   position: z.string().optional(),
-  role: z.enum(["admin", "employee"]).default("employee"),
+  role: z.enum(["superadmin", "admin", "employee"]).default("employee"),
   salary: z.coerce.number().optional().or(z.literal("")),
   shiftType: z.enum(["one_shift", "two_shifts", "open"]).default("one_shift"),
   shiftStartTime: z.string().optional(),
@@ -296,7 +298,7 @@ export default function EmployeesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<SafeUser | null>(null);
   const { toast } = useToast();
-
+  const { user } = useAuth();
   const { data: employees, isLoading } = useQuery<SafeUser[]>({
     queryKey: ["/api/admin/employees"],
   });
@@ -789,6 +791,9 @@ export default function EmployeesPage() {
                                           <SelectContent>
                                             <SelectItem value="employee">Employee</SelectItem>
                                             <SelectItem value="admin">Admin</SelectItem>
+                                            {user?.role === "superadmin" && (
+                                              <SelectItem value="superadmin">Super Admin</SelectItem>
+                                            )}
                                           </SelectContent>
                                         </Select>
                                         <FormMessage />
@@ -1314,11 +1319,14 @@ export default function EmployeesPage() {
                               <Badge
                                 className={cn(
                                   "font-medium border-0",
-                                  employee.role === "admin"
-                                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
-                                    : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                                  employee.role === "superadmin"
+                                    ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                                    : employee.role === "admin"
+                                      ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                                 )}
                               >
+                                {employee.role === "superadmin" && <Zap className="h-3 w-3 mr-1" />}
                                 {employee.role === "admin" && <Shield className="h-3 w-3 mr-1" />}
                                 {employee.role}
                               </Badge>
@@ -1353,18 +1361,26 @@ export default function EmployeesPage() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-48">
-                                  <DropdownMenuItem onClick={() => handleEdit(employee)}>
-                                    <Pencil className="h-4 w-4 mr-2" />
-                                    Edit Details
-                                  </DropdownMenuItem>
+                                  {/* Only superadmin can edit other superadmins */}
+                                  {(employee.role !== "superadmin" || user?.role === "superadmin") && (
+                                    <DropdownMenuItem onClick={() => handleEdit(employee)}>
+                                      <Pencil className="h-4 w-4 mr-2" />
+                                      Edit Details
+                                    </DropdownMenuItem>
+                                  )}
+
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                                    onClick={() => handleDelete(employee)}
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Delete Employee
-                                  </DropdownMenuItem>
+
+                                  {/* Nobody can delete a superadmin */}
+                                  {employee.role !== "superadmin" && (
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                      onClick={() => handleDelete(employee)}
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Delete Employee
+                                    </DropdownMenuItem>
+                                  )}
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>

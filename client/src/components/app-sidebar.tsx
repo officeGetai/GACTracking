@@ -72,6 +72,13 @@ const adminNavItems = [
     gradient: "from-violet-400 to-violet-600",
     glow: "shadow-violet-500/25",
   },
+  {
+    title: "Shift Control",
+    url: "/admin/shift-control",
+    icon: Zap,
+    gradient: "from-amber-400 to-orange-600",
+    glow: "shadow-orange-500/25",
+  },
   // ADDED: BD Target Setup
   {
     title: "BD Targets",
@@ -481,7 +488,10 @@ const UserMenu = ({ collapsed }: { collapsed: boolean }) => {
         <DropdownMenuSeparator className="bg-slate-800" />
         <DropdownMenuItem
           className="text-slate-300 hover:text-white hover:bg-white/5 focus:bg-white/5 cursor-pointer"
-          onClick={() => setLocation(user?.role === "admin" ? "/admin/notifications" : "/employee/notifications")}
+          onClick={() => {
+            const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+            setLocation(isAdmin ? "/admin/notifications" : "/employee/notifications");
+          }}
         >
           <Bell className="w-4 h-4 mr-2" />
           Notifications
@@ -562,7 +572,8 @@ export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
 
   const collapsed = state === "collapsed";
-  const navItems = user?.role === "admin" ? adminNavItems : employeeNavItems;
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+  const navItems = isAdmin ? adminNavItems : employeeNavItems;
 
   // Separate main and system items
   const mainItems = navItems.filter(

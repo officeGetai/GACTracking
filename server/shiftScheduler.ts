@@ -58,25 +58,25 @@ function calculateShiftEndDateTime(
 ): Date {
     const [endHours, endMinutes] = endTimeStr.split(':').map(Number);
     const [startHours, startMinutes] = startTimeStr ? startTimeStr.split(':').map(Number) : [0, 0];
-    
+
     // Use scheduledDate if available, otherwise fall back to shiftDate
     const baseDate = scheduledDate || shiftDate;
-    
+
     // Create end date in Pakistan timezone (UTC+5)
     const paddedEndHours = String(endHours).padStart(2, '0');
     const paddedEndMinutes = String(endMinutes || 0).padStart(2, '0');
     let endDate = new Date(`${baseDate}T${paddedEndHours}:${paddedEndMinutes}:00+05:00`);
-    
+
     const startMinutesTotal = startHours * 60 + (startMinutes || 0);
     const endMinutesTotal = endHours * 60 + (endMinutes || 0);
-    
+
     // Case 1: Classic cross-midnight shift (e.g., 22:00 - 06:00)
     // Start is in evening (>= 12:00) and end is earlier than start (in morning)
     if (startTimeStr && endMinutesTotal < startMinutesTotal && startHours >= 12) {
         endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000); // Add one day
         // Don't return early - still apply the safeguard below
     }
-    
+
     // For legacy shifts without scheduledDate, apply fallback logic
     if (!scheduledDate) {
         // Fallback: if end time is before clock-in, add a day
@@ -84,7 +84,7 @@ function calculateShiftEndDateTime(
             endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
         }
     }
-    
+
     // CRITICAL SAFEGUARD: End time must ALWAYS be after clock-in time
     // A shift cannot end before it starts - if this happens, add a day
     // This handles all edge cases including cross-midnight shifts with early morning start times
@@ -92,7 +92,7 @@ function calculateShiftEndDateTime(
         console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is before/equal clock-in ${clockInTime.toISOString()}, adding a day`);
         endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
     }
-    
+
     // Additional sanity check: end time should be within 24 hours of clock-in
     // If gap is more than 24 hours, something is wrong
     const gapHours = (endDate.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
@@ -100,7 +100,7 @@ function calculateShiftEndDateTime(
         console.warn(`[ShiftScheduler] End time ${endDate.toISOString()} is ${gapHours.toFixed(1)}h after clock-in, capping to 24h`);
         endDate = new Date(clockInTime.getTime() + 24 * 60 * 60 * 1000);
     }
-    
+
     return endDate;
 }
 
@@ -152,10 +152,58 @@ async function checkAndAutoCloseShifts() {
                 if (overtimeEndTime && overtimeClockInTime && user.phone) {
                     const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, overtimeStartTime, overtimeEndTime, overtimeClockInTime);
                     const fullName = `${user.firstName} ${user.lastName}`;
-                    
+
                     // Calculate hours since shift end
                     const hoursSinceEnd = (now.getTime() - endDate.getTime()) / (1000 * 60 * 60);
-                    
+
+                    // ============================================================
+                    // Reminder 0: At shift end time (0 to 1 hour after end)
+                    // Notify employee that their required hours are complete
+                    // ============================================================
+                    if (hoursSinceEnd >= 0 && hoursSinceEnd < OVERTIME_REMINDER_1_HOURS) {
+                        // Check if already sent shift end reminder
+                        const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
+                        const alreadySentShiftEnd = logs.some(log =>
+                            log.action === "shift_end_reminder_sent" &&
+                            (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000)
+                        );
+
+                        if (!alreadySentShiftEnd) {
+                            console.log(`[ShiftScheduler] Sending shift end reminder to ${user.username} - required hours completed`);
+
+                            const shiftEndMessage = `⏰ Your ${overtimeShiftPeriod} shift at GAC has now completed its scheduled time.
+
+If you're done working, please:
+1. Submit your shift report
+2. Clock out from the GAC Tracking app
+
+If you're still working, press the "Extend Overtime Window" button to continue. Otherwise, your shift will auto-close in ${AUTO_CLOSE_DELAY_HOURS} hours.`;
+
+                            try {
+                                // Send to employee
+                                await sendPersonalWhatsApp(user.phone, shiftEndMessage, wasenderSettings);
+
+                                // Send to alert group
+                                if (wasenderSettings.trackingAlertsGroupId) {
+                                    await sendGroupWhatsApp(
+                                        wasenderSettings.trackingAlertsGroupId,
+                                        `[Shift Complete] ${fullName}'s ${overtimeShiftPeriod} shift has reached its scheduled end time. Waiting for clock-out or overtime extension.`,
+                                        wasenderSettings
+                                    );
+                                }
+
+                                await storage.createActivityLog({
+                                    userId: user.id,
+                                    action: "shift_end_reminder_sent",
+                                    details: `Sent shift end reminder for ${overtimeShiftPeriod} shift - required hours completed`,
+                                    timestamp: now
+                                });
+                            } catch (err) {
+                                console.error(`[ShiftScheduler] Failed to send shift end reminder to ${user.username}:`, err);
+                            }
+                        }
+                    }
+
                     // Reminder 1: At +1 hour after shift end
                     if (hoursSinceEnd >= OVERTIME_REMINDER_1_HOURS && hoursSinceEnd < OVERTIME_REMINDER_2_HOURS) {
                         // Check if already sent first reminder
@@ -198,7 +246,7 @@ async function checkAndAutoCloseShifts() {
                     // Reminder 2: At +2 hours after shift end (only if employee extended at +1h)
                     if (hoursSinceEnd >= OVERTIME_REMINDER_2_HOURS && hoursSinceEnd < AUTO_CLOSE_DELAY_HOURS) {
                         // Check if extended after first reminder
-                        const hasExtended = shift.lastOvertimeExtension && 
+                        const hasExtended = shift.lastOvertimeExtension &&
                             new Date(shift.lastOvertimeExtension).getTime() > (endDate.getTime() + OVERTIME_REMINDER_1_HOURS * 60 * 60 * 1000);
 
                         if (hasExtended) {
@@ -267,16 +315,16 @@ async function checkAndAutoCloseShifts() {
 
                 if (warningEndTime && warningClockInTime && user.phone) {
                     const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, warningStartTime, warningEndTime, warningClockInTime);
-                    
+
                     // Calculate effective auto-close time considering extensions
                     let effectiveAutoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
-                    
+
                     // If employee extended overtime, add extension time
                     if (shift.lastOvertimeExtension) {
                         const extensionCount = shift.overtimeReminderCount || 1;
                         effectiveAutoCloseTime = new Date(effectiveAutoCloseTime.getTime() + (extensionCount * OVERTIME_EXTENSION_HOURS * 60 * 60 * 1000));
                     }
-                    
+
                     const minutesUntilAutoClose = (effectiveAutoCloseTime.getTime() - now.getTime()) / (1000 * 60);
 
                     // Send warning if we're within 15 minutes of auto-close AND shift hasn't auto-closed yet
@@ -340,10 +388,10 @@ async function checkAndAutoCloseShifts() {
                     // Use the new cross-midnight aware function with scheduledDate
                     const clockInTime = new Date(shift.morningClockIn);
                     const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
-                    
+
                     // Calculate effective auto-close time considering overtime extensions
                     let autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
-                    
+
                     // If employee extended overtime, add extension time
                     if (shift.lastOvertimeExtension) {
                         const extensionCount = shift.overtimeReminderCount || 1;
@@ -399,10 +447,10 @@ async function checkAndAutoCloseShifts() {
                     // Use the new cross-midnight aware function with scheduledDate
                     const clockInTime = new Date(shift.eveningClockIn);
                     const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
-                    
+
                     // Calculate effective auto-close time considering overtime extensions
                     let autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
-                    
+
                     // If employee extended overtime, add extension time
                     if (shift.lastOvertimeExtension) {
                         const extensionCount = shift.overtimeReminderCount || 1;
@@ -489,22 +537,22 @@ function getNowInPakistan(): Date {
         hour12: false,
         hourCycle: 'h23'
     });
-    
+
     const parts = formatter.formatToParts(now);
     const getPart = (type: string) => parts.find(p => p.type === type)?.value || '00';
-    
+
     const year = getPart('year');
     const month = getPart('month');
     const day = getPart('day');
     let hour = getPart('hour');
     const minute = getPart('minute');
     const second = getPart('second');
-    
+
     // Handle edge case where hour could be "24" (use "00" instead)
     if (hour === '24') {
         hour = '00';
     }
-    
+
     // Create date string in Pakistan timezone (UTC+5)
     return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}+05:00`);
 }
@@ -528,7 +576,7 @@ async function checkAndMarkAbsentEmployees() {
         for (const employee of scheduledEmployees) {
             // Get existing shift for today
             const existingShift = await storage.getShiftByUserAndDate(employee.id, today);
-            
+
             // For two_shift employees, we check absence by notes (morning/evening tracked separately)
             // Don't skip entirely based on status - instead check each shift period independently
 
@@ -550,25 +598,25 @@ async function checkAndMarkAbsentEmployees() {
                 if (now >= absentThreshold) {
                     // Check if employee has clocked in for morning shift
                     const hasMorningClockIn = existingShift?.morningClockIn !== null;
-                    
+
                     // Check if already marked absent for morning (via notes or approved leave)
                     const shiftNotes = existingShift?.notes || "";
                     const alreadyAbsentForMorning = shiftNotes.includes("morning");
-                    
+
                     if (!hasMorningClockIn && !alreadyAbsentForMorning) {
                         // Check if we've already marked them absent today (prevent duplicate marking)
                         const logs = await storage.getActivityLogsByUser(employee.id, today);
-                        const alreadyMarked = logs.some(log => 
-                            log.action === "auto_absent_marked" && 
+                        const alreadyMarked = logs.some(log =>
+                            log.action === "auto_absent_marked" &&
                             log.details?.includes("morning")
                         );
 
                         if (!alreadyMarked) {
                             console.log(`[ShiftScheduler] Marking ${employee.username} as ABSENT (2h past morning shift start: ${morningStartTime})`);
-                            
+
                             // Mark as absent
                             await storage.markEmployeeAbsent(employee.id, today, 'morning');
-                            
+
                             // Log activity
                             await storage.createActivityLog({
                                 userId: employee.id,
@@ -596,27 +644,27 @@ async function checkAndMarkAbsentEmployees() {
                 if (now >= absentThreshold) {
                     // Check if employee has clocked in for evening shift
                     const hasEveningClockIn = existingShift?.eveningClockIn !== null;
-                    
+
                     // Check if already marked absent for evening (via notes or approved leave)
                     // Need to re-fetch shift in case morning just added absent status
                     const currentShift = await storage.getShiftByUserAndDate(employee.id, today);
                     const shiftNotes = currentShift?.notes || "";
                     const alreadyAbsentForEvening = shiftNotes.includes("evening");
-                    
+
                     // Mark absent for evening if they haven't clocked in and not already marked
                     if (!hasEveningClockIn && !alreadyAbsentForEvening) {
                         const logs = await storage.getActivityLogsByUser(employee.id, today);
-                        const alreadyMarked = logs.some(log => 
-                            log.action === "auto_absent_marked" && 
+                        const alreadyMarked = logs.some(log =>
+                            log.action === "auto_absent_marked" &&
                             log.details?.includes("evening")
                         );
 
                         if (!alreadyMarked) {
                             console.log(`[ShiftScheduler] Marking ${employee.username} as ABSENT for evening (2h past evening shift start: ${eveningStartTime})`);
-                            
+
                             // Mark as absent for evening
                             await storage.markEmployeeAbsent(employee.id, today, 'evening');
-                            
+
                             // Log activity
                             await storage.createActivityLog({
                                 userId: employee.id,

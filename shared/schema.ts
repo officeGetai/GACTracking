@@ -466,8 +466,11 @@ export const insertBdTargetSchema = createInsertSchema(bdTargets).omit({
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
-  role: z.enum(["admin", "employee"]),
+  role: z.enum(["superadmin", "admin", "employee"]),
 });
+
+// User roles constant for reference
+export const USER_ROLES = ["superadmin", "admin", "employee"] as const;
 
 // Types (automatically inferred from Drizzle schemas)
 export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;

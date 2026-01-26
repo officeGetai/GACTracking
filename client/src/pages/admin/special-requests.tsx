@@ -70,7 +70,7 @@ function getCurrentMonth(): string {
 function getMonthOptions() {
   const options = [];
   const now = new Date();
-  
+
   for (let i = -2; i < 24; i++) {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
     options.push({
@@ -82,11 +82,11 @@ function getMonthOptions() {
 }
 
 // Status configuration
-const statusConfig: Record<string, { 
-  label: string; 
+const statusConfig: Record<string, {
+  label: string;
   shortLabel: string;
-  color: string; 
-  icon: any; 
+  color: string;
+  icon: any;
   bg: string;
   dot: string;
 }> = {
@@ -140,7 +140,7 @@ function getInitials(firstName: string, lastName: string) {
 function getAvatarGradient(name: string) {
   const gradients = [
     "from-violet-500 to-purple-500",
-    "from-blue-500 to-cyan-500", 
+    "from-blue-500 to-cyan-500",
     "from-emerald-500 to-teal-500",
     "from-orange-500 to-red-500",
     "from-pink-500 to-rose-500",
@@ -151,15 +151,15 @@ function getAvatarGradient(name: string) {
 }
 
 // Mini Stat Pill Component
-function StatPill({ 
-  label, 
-  value, 
+function StatPill({
+  label,
+  value,
   dotColor,
   isActive,
   onClick,
-}: { 
-  label: string; 
-  value: number; 
+}: {
+  label: string;
+  value: number;
   dotColor: string;
   isActive?: boolean;
   onClick?: () => void;
@@ -170,8 +170,8 @@ function StatPill({
       className={cn(
         "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all",
         "hover:scale-105 active:scale-95",
-        isActive 
-          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-lg" 
+        isActive
+          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-lg"
           : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
       )}
     >
@@ -188,17 +188,17 @@ function StatPill({
 }
 
 // Request List Item
-function RequestItem({ 
-  request, 
-  isSelected, 
-  onClick 
-}: { 
-  request: any; 
-  isSelected: boolean; 
+function RequestItem({
+  request,
+  isSelected,
+  onClick
+}: {
+  request: any;
+  isSelected: boolean;
   onClick: () => void;
 }) {
   const config = statusConfig[request.status] || statusConfig.sent_for_approval;
-  
+
   return (
     <button
       onClick={onClick}
@@ -223,7 +223,7 @@ function RequestItem({
             config.dot
           )} />
         </div>
-        
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 mb-0.5">
             <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
@@ -250,7 +250,7 @@ function RequestItem({
             )}
           </div>
         </div>
-        
+
         {isSelected && (
           <ArrowUpRight className="h-4 w-4 text-slate-400 shrink-0" />
         )}
@@ -262,10 +262,10 @@ function RequestItem({
 // Main Component
 export default function AdminSpecialRequestsPage() {
   const { toast } = useToast();
-  
+
   // Use local time for current month
   const currentMonth = getCurrentMonth();
-  
+
   // States
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [selectedDate, setSelectedDate] = useState("");
@@ -277,12 +277,12 @@ export default function AdminSpecialRequestsPage() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [responseComment, setResponseComment] = useState("");
   const [responseStatus, setResponseStatus] = useState("");
-  
+
   // New: Edited request dates for admin to modify before approval
-  const [editedRequestDates, setEditedRequestDates] = useState<Array<{date: string, shiftType: string}>>([]);
+  const [editedRequestDates, setEditedRequestDates] = useState<Array<{ date: string, shiftType: string }>>([]);
   const [newDateInput, setNewDateInput] = useState("");
   const [newShiftTypeInput, setNewShiftTypeInput] = useState("");
-  
+
   // Get shift label helper
   const getShiftLabel = (shiftType: string) => {
     switch (shiftType) {
@@ -294,11 +294,11 @@ export default function AdminSpecialRequestsPage() {
       default: return shiftType;
     }
   };
-  
+
   // Get shift options based on employee's shift type
   const getShiftOptionsForEmployee = (employee: any) => {
     if (!employee) return [{ value: "complete", label: "Complete Shift" }];
-    
+
     switch (employee.shiftType) {
       case "open_shift":
         return [{ value: "complete", label: "Complete Shift" }];
@@ -393,7 +393,7 @@ export default function AdminSpecialRequestsPage() {
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter((r: any) => 
+      filtered = filtered.filter((r: any) =>
         r.title.toLowerCase().includes(q) ||
         r.details.toLowerCase().includes(q) ||
         `${r.user?.firstName} ${r.user?.lastName}`.toLowerCase().includes(q)
@@ -424,7 +424,7 @@ export default function AdminSpecialRequestsPage() {
     mutationFn: async () => {
       if (!selectedRequestId) throw new Error("No request selected");
       const actualStatus = responseStatus && responseStatus !== "no_change" ? responseStatus : undefined;
-      
+
       // If there's a status change, use PATCH endpoint with edited dates
       if (actualStatus) {
         const res = await apiRequest("PATCH", `/api/admin/requests/special/${selectedRequestId}`, {
@@ -434,7 +434,7 @@ export default function AdminSpecialRequestsPage() {
         });
         if (!res.ok) throw new Error(await res.text());
       }
-      
+
       // Also add comment to conversation thread
       const commentRes = await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
         comment: responseComment,
@@ -458,7 +458,7 @@ export default function AdminSpecialRequestsPage() {
   const quickActionMutation = useMutation({
     mutationFn: async ({ status, comment }: { status: string; comment: string }) => {
       if (!selectedRequestId) throw new Error("No request selected");
-      
+
       // Use PATCH endpoint to update status with admin response and edited dates
       const res = await apiRequest("PATCH", `/api/admin/requests/special/${selectedRequestId}`, {
         status,
@@ -466,13 +466,13 @@ export default function AdminSpecialRequestsPage() {
         requestDates: editedRequestDates.length > 0 ? editedRequestDates : undefined,
       });
       if (!res.ok) throw new Error(await res.text());
-      
+
       // Also add a comment for the conversation thread
       await apiRequest("POST", `/api/requests/special/${selectedRequestId}/comments`, {
         comment,
         statusChange: status,
       });
-      
+
       return res.json();
     },
     onSuccess: (_, variables) => {
@@ -491,16 +491,16 @@ export default function AdminSpecialRequestsPage() {
       setSelectedRequestId(filteredRequests[0].id);
     }
   }, [filteredRequests, selectedRequestId]);
-  
+
   // Sync edited dates when request changes
   useEffect(() => {
     if (selectedRequest?.requestDates && Array.isArray(selectedRequest.requestDates)) {
-      setEditedRequestDates(selectedRequest.requestDates as Array<{date: string, shiftType: string}>);
+      setEditedRequestDates(selectedRequest.requestDates as Array<{ date: string, shiftType: string }>);
     } else {
       setEditedRequestDates([]);
     }
   }, [selectedRequest?.id, selectedRequest?.requestDates]);
-  
+
   // Add date to edited list
   const addEditedDate = () => {
     if (!newDateInput || !newShiftTypeInput) return;
@@ -513,7 +513,7 @@ export default function AdminSpecialRequestsPage() {
     setNewDateInput("");
     setNewShiftTypeInput("");
   };
-  
+
   // Remove date from edited list
   const removeEditedDate = (index: number) => {
     setEditedRequestDates(editedRequestDates.filter((_, i) => i !== index));
@@ -640,7 +640,7 @@ export default function AdminSpecialRequestsPage() {
           <SelectContent>
             <SelectItem value="all">All Employees</SelectItem>
             {employees
-              .filter((e: any) => e.role !== 'admin')
+              .filter((e: any) => e.role !== 'admin' && e.role !== 'superadmin')
               .sort((a: any, b: any) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
               .map((emp: any) => (
                 <SelectItem key={emp.id} value={emp.id}>
@@ -891,34 +891,34 @@ export default function AdminSpecialRequestsPage() {
                       {(editedRequestDates.length > 0 || selectedRequest.status === "sent_for_approval" || (selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates) && selectedRequest.requestDates.length > 0)) && (
                         <div className={cn(
                           "rounded-xl p-4 border",
-                          selectedRequest.status === "approved" 
+                          selectedRequest.status === "approved"
                             ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800"
                             : selectedRequest.status === "not_approved"
-                            ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
-                            : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                              ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+                              : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
                         )}>
                           <div className="flex items-center gap-2 mb-3">
                             <CalendarDays className={cn(
                               "h-4 w-4",
-                              selectedRequest.status === "approved" 
+                              selectedRequest.status === "approved"
                                 ? "text-emerald-600 dark:text-emerald-400"
                                 : selectedRequest.status === "not_approved"
-                                ? "text-red-600 dark:text-red-400"
-                                : "text-blue-600 dark:text-blue-400"
+                                  ? "text-red-600 dark:text-red-400"
+                                  : "text-blue-600 dark:text-blue-400"
                             )} />
                             <span className={cn(
                               "text-sm font-medium",
-                              selectedRequest.status === "approved" 
+                              selectedRequest.status === "approved"
                                 ? "text-emerald-900 dark:text-emerald-100"
                                 : selectedRequest.status === "not_approved"
-                                ? "text-red-900 dark:text-red-100"
-                                : "text-blue-900 dark:text-blue-100"
+                                  ? "text-red-900 dark:text-red-100"
+                                  : "text-blue-900 dark:text-blue-100"
                             )}>
-                              {selectedRequest.status === "approved" 
-                                ? "Approved Leave Dates" 
+                              {selectedRequest.status === "approved"
+                                ? "Approved Leave Dates"
                                 : selectedRequest.status === "not_approved"
-                                ? "Rejected Leave Dates"
-                                : "Requested Leave Dates"}
+                                  ? "Rejected Leave Dates"
+                                  : "Requested Leave Dates"}
                             </span>
                             {selectedRequest.status === "sent_for_approval" && (
                               <Badge variant="secondary" className="text-[10px] ml-auto">
@@ -931,16 +931,16 @@ export default function AdminSpecialRequestsPage() {
                               </Badge>
                             )}
                           </div>
-                          
+
                           {/* Display dates list */}
                           {(() => {
                             // Use editedRequestDates for pending, or the original requestDates for approved/rejected
-                            const datesToShow = selectedRequest.status === "sent_for_approval" 
-                              ? editedRequestDates 
-                              : (selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates) 
-                                  ? selectedRequest.requestDates as Array<{date: string, shiftType: string}> 
-                                  : []);
-                            
+                            const datesToShow = selectedRequest.status === "sent_for_approval"
+                              ? editedRequestDates
+                              : (selectedRequest.requestDates && Array.isArray(selectedRequest.requestDates)
+                                ? selectedRequest.requestDates as Array<{ date: string, shiftType: string }>
+                                : []);
+
                             return datesToShow.length > 0 ? (
                               <div className="space-y-2 mb-3">
                                 {datesToShow.map((item, index) => (
@@ -948,21 +948,21 @@ export default function AdminSpecialRequestsPage() {
                                     key={index}
                                     className={cn(
                                       "flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border",
-                                      selectedRequest.status === "approved" 
+                                      selectedRequest.status === "approved"
                                         ? "border-emerald-100 dark:border-emerald-800"
                                         : selectedRequest.status === "not_approved"
-                                        ? "border-red-100 dark:border-red-800"
-                                        : "border-blue-100 dark:border-blue-800"
+                                          ? "border-red-100 dark:border-red-800"
+                                          : "border-blue-100 dark:border-blue-800"
                                     )}
                                   >
                                     <div className="flex items-center gap-2 text-sm">
                                       <Calendar className={cn(
                                         "w-3.5 h-3.5",
-                                        selectedRequest.status === "approved" 
+                                        selectedRequest.status === "approved"
                                           ? "text-emerald-500"
                                           : selectedRequest.status === "not_approved"
-                                          ? "text-red-500"
-                                          : "text-blue-500"
+                                            ? "text-red-500"
+                                            : "text-blue-500"
                                       )} />
                                       <span className="font-medium">{format(parseISO(item.date), "MMM d, yyyy")}</span>
                                       <span className="text-slate-400">-</span>
@@ -989,7 +989,7 @@ export default function AdminSpecialRequestsPage() {
                               <p className="text-xs text-slate-500 mb-3">No dates specified</p>
                             );
                           })()}
-                          
+
                           {/* Add new date (only for pending requests) */}
                           {selectedRequest.status === "sent_for_approval" && (
                             <div className="flex items-end gap-2 pt-2 border-t border-blue-200 dark:border-blue-700">
@@ -1050,8 +1050,8 @@ export default function AdminSpecialRequestsPage() {
                             <Avatar className="h-7 w-7 shrink-0">
                               <AvatarFallback className={cn(
                                 "text-[10px] font-bold",
-                                comment.isAdminComment 
-                                  ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white" 
+                                comment.isAdminComment
+                                  ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white"
                                   : cn("text-white bg-gradient-to-br", getAvatarGradient(comment.user?.firstName || ""))
                               )}>
                                 {comment.isAdminComment ? "AD" : getInitials(comment.user?.firstName || "", comment.user?.lastName || "")}
@@ -1078,7 +1078,7 @@ export default function AdminSpecialRequestsPage() {
                                 )}>
                                   {comment.comment}
                                 </p>
-                                
+
                                 {comment.statusChange && (
                                   <div className={cn(
                                     "mt-2 pt-2 border-t flex items-center gap-1.5",

@@ -195,14 +195,14 @@ function ReportCard({
             {format(reportDate, "EEE, MMM d")}
           </span>
         </div>
-        
+
         {videos.length > 0 && (
           <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0.5 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400">
             <Video className="h-2.5 w-2.5" />
             {videos.length}
           </Badge>
         )}
-        
+
         {refs.length > 0 && (
           <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
             <Link2 className="h-2.5 w-2.5" />
@@ -259,10 +259,10 @@ function DepartmentGroup({
       {/* Reports Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {reports.map((report) => (
-          <ReportCard 
-            key={report.id} 
-            report={report} 
-            onClick={() => onViewReport(report)} 
+          <ReportCard
+            key={report.id}
+            report={report}
+            onClick={() => onViewReport(report)}
           />
         ))}
       </div>
@@ -291,7 +291,7 @@ export default function AdminDailyReportsPage() {
   // Delete report function
   const handleDeleteReport = async () => {
     if (!selectedReport) return;
-    
+
     setIsDeleting(true);
     try {
       const res = await apiRequest("DELETE", `/api/admin/reports/daily/${selectedReport.id}`);
@@ -299,12 +299,12 @@ export default function AdminDailyReportsPage() {
         const error = await res.json();
         throw new Error(error.error || "Failed to delete report");
       }
-      
+
       toast({
         title: "Report Deleted",
         description: "The report has been successfully deleted.",
       });
-      
+
       setDeleteConfirmOpen(false);
       setViewDialogOpen(false);
       setSelectedReport(null);
@@ -338,9 +338,9 @@ export default function AdminDailyReportsPage() {
       if (selectedEmployee !== "all") {
         url += `&userId=${selectedEmployee}`;
       }
-      
+
       console.log("Fetching reports:", url);
-      
+
       const res = await apiRequest("GET", url);
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -389,7 +389,7 @@ export default function AdminDailyReportsPage() {
       filtered = filtered.filter((r: any) => r.date === selectedDate);
     }
 
-    return filtered.sort((a: any, b: any) => 
+    return filtered.sort((a: any, b: any) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }, [reports, searchQuery, selectedDepartment, selectedDate]);
@@ -412,19 +412,19 @@ export default function AdminDailyReportsPage() {
     const uniqueEmployees = new Set(reports.map((r: any) => r.userId)).size;
     const withVideos = reports.filter((r: any) => safeParseArray(r.loomVideos).length > 0).length;
     const withRefs = reports.filter((r: any) => safeParseArray(r.references).length > 0).length;
-    
+
     // Get today's date in local format
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    
+
     const todayReports = reports.filter((r: any) => r.date === todayStr).length;
 
-    return { 
-      total: reports.length, 
-      uniqueEmployees, 
-      withVideos, 
+    return {
+      total: reports.length,
+      uniqueEmployees,
+      withVideos,
       withRefs,
-      todayReports 
+      todayReports
     };
   }, [reports]);
 
@@ -521,7 +521,7 @@ export default function AdminDailyReportsPage() {
           <SelectContent>
             <SelectItem value="all">All Employees</SelectItem>
             {employees
-              .filter((e: any) => e.role !== 'admin')
+              .filter((e: any) => e.role !== 'admin' && e.role !== 'superadmin')
               .map((emp: any) => (
                 <SelectItem key={emp.id} value={emp.id}>
                   {emp.firstName} {emp.lastName}
