@@ -15,42 +15,51 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-// Low-level fix for IPv6 ETIMEDOUT issues:
-// 1. Resolve hostname to an IPv4 address AT BOOT
-// 2. Use the IP address directly for the connection
-// 3. Keep SSL working by specifying the servername
 const dbUrl = new URL(process.env.DATABASE_URL);
 const originalHost = dbUrl.hostname;
+const isProduction = process.env.NODE_ENV === "production";
 
-// Synchronous resolve is not possible in node:dns, so we use a pre-resolved IP or the first one found
 let resolvedIp = originalHost;
-try {
-  const addresses = await dns.promises.resolve4(originalHost);
-  if (addresses.length > 0) {
-    resolvedIp = addresses[0];
-    console.log(`[DB] Resolved ${originalHost} to ${resolvedIp}`);
+
+function createPool(host: string) {
+  const poolConfig: any = {
+    host: host,
+    port: parseInt(dbUrl.port || "5432"),
+    user: dbUrl.username,
+    password: decodeURIComponent(dbUrl.password || ""),
+    database: dbUrl.pathname.substring(1),
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    max: 20,
+  };
+
+  if (isProduction) {
+    poolConfig.ssl = {
+      rejectUnauthorized: false,
+      servername: originalHost,
+    };
   }
-} catch (err) {
-  console.error(`[DB] DNS Resolve Error: ${err instanceof Error ? err.message : String(err)}`);
+
+  return new Pool(poolConfig);
 }
 
-export const pool = new Pool({
-  host: resolvedIp,
-  port: parseInt(dbUrl.port || "5432"),
-  user: dbUrl.username,
-  password: decodeURIComponent(dbUrl.password || ""),
-  database: dbUrl.pathname.substring(1),
-  ssl: {
-    rejectUnauthorized: false, // Typical for Neon/Cloud DBs
-    servername: originalHost,   // REQUIRED for SNI
-  },
-  // Stability settings
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
-  max: 20,
-} as any);
+export let pool = createPool(resolvedIp);
 
-// Pool event monitoring
+if (isProduction) {
+  (async () => {
+    try {
+      const addresses = await dns.promises.resolve4(originalHost);
+      if (addresses.length > 0) {
+        resolvedIp = addresses[0];
+        console.log(`[DB] Resolved ${originalHost} to ${resolvedIp}`);
+        pool = createPool(resolvedIp);
+      }
+    } catch (err) {
+      console.error(`[DB] DNS Resolve Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  })();
+}
+
 pool.on('connect', () => console.log('[DB] New client connected to pool'));
 pool.on('error', (err: any) => console.error('[DB] Unexpected pool error:', err));
 
