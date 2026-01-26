@@ -7,7 +7,6 @@ import { rm, readFile } from "fs/promises";
 const allowlist = [
   "@google/generative-ai",
   "axios",
-  "bcrypt",
   "connect-pg-simple",
   "cors",
   "date-fns",
@@ -33,6 +32,11 @@ const allowlist = [
   "zod-validation-error",
 ];
 
+const nativeModules = [
+  "bcrypt",
+  "better-sqlite3",
+];
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
@@ -45,7 +49,13 @@ async function buildAll() {
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
   ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  
+  // Native modules must always be external (not bundled)
+  // They need to be installed at runtime for the target platform
+  const externals = [
+    ...allDeps.filter((dep) => !allowlist.includes(dep)),
+    ...nativeModules,
+  ];
 
   await esbuild({
     entryPoints: ["server/index.ts"],
