@@ -930,11 +930,27 @@ export default function AdminDashboard() {
 
   // Filter by search
   const filteredEmployees = useMemo(() => {
-    if (!searchQuery) return employeesWithData;
-    const query = searchQuery.toLowerCase();
-    return employeesWithData.filter(({ employee }) =>
-      `${employee.firstName} ${employee.lastName}`.toLowerCase().includes(query)
-    );
+    if (!searchQuery.trim()) return employeesWithData;
+
+    // Normalize query: lowercase and trim
+    const query = searchQuery.toLowerCase().trim();
+
+    // Split query terms for multi-word matching
+    const queryTerms = query.split(/\s+/).filter(term => term.length > 0);
+
+    return employeesWithData.filter(({ employee }) => {
+      // Create a searchable string containing all relevant info
+      const searchableText = `
+        ${employee.firstName} 
+        ${employee.lastName} 
+        ${employee.username} 
+        ${employee.department || ""} 
+        ${employee.position || ""}
+      `.toLowerCase();
+
+      // Check if ALL terms are present in the searchable text (AND logic)
+      return queryTerms.every(term => searchableText.includes(term));
+    });
   }, [employeesWithData, searchQuery]);
 
   // Group by department
@@ -1089,21 +1105,26 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Late Alert */}
-        {!dismissedLateAlert && allLateEmployees.length > 0 && (
-          <div className="shrink-0 px-4 pt-3">
-            <LateAlertBanner lateEmployees={allLateEmployees} onDismiss={() => setDismissedLateAlert(true)} />
-          </div>
-        )}
+        {/* Scrollable Content Area */}
+        <ScrollArea className="flex-1 h-full">
+          <div className="flex flex-col min-h-[850px] p-4">
+            {/* Late Alert */}
+            {!dismissedLateAlert && allLateEmployees.length > 0 && (
+              <div className="shrink-0 mb-4">
+                <LateAlertBanner lateEmployees={allLateEmployees} onDismiss={() => setDismissedLateAlert(true)} />
+              </div>
+            )}
 
-        {/* Main Content */}
-        <div className="flex-1 p-4 overflow-hidden">
-          <div className="h-full grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <DepartmentColumn name="Development" employees={byDepartment["Development"]} config={DEPARTMENT_CONFIG["Development"]} />
-            <DepartmentColumn name="Business Development" employees={byDepartment["Business Development"]} config={DEPARTMENT_CONFIG["Business Development"]} />
-            <DepartmentColumn name="Designing Team" employees={byDepartment["Designing Team"]} config={DEPARTMENT_CONFIG["Designing Team"]} />
+            {/* Main Content Info */}
+            <div className="flex-1 overflow-x-auto pb-2">
+              <div className="h-full grid grid-cols-1 lg:grid-cols-3 gap-4 min-w-[1024px] lg:min-w-0">
+                <DepartmentColumn name="Development" employees={byDepartment["Development"]} config={DEPARTMENT_CONFIG["Development"]} />
+                <DepartmentColumn name="Business Development" employees={byDepartment["Business Development"]} config={DEPARTMENT_CONFIG["Business Development"]} />
+                <DepartmentColumn name="Designing Team" employees={byDepartment["Designing Team"]} config={DEPARTMENT_CONFIG["Designing Team"]} />
+              </div>
+            </div>
           </div>
-        </div>
+        </ScrollArea>
 
         {/* Debug Panel */}
         <DebugPanel employees={allEmployees} shifts={todayShifts} shiftMap={shiftMap} />

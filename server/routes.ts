@@ -469,13 +469,42 @@ async function getEffectiveWorkingDate(userId: string): Promise<{
   };
 }> {
   const now = new Date();
-  const today = getTodayDate();
+  let workingDateCandidate = getTodayDate();
+  const pktHour = getPakistaniHour();
+
+  // =========================================================
+  // CROSS-MIDNIGHT HANDLING:
+  // If we are in the early morning (before 5 AM PKT) and the 
+  // user is scheduled for an evening shift (starting at or after 6 PM),
+  // then they are likely clocking in for "yesterday's" shift.
+  // =========================================================
+  if (pktHour < 5) {
+    try {
+      const user = await storage.getUser(userId);
+      // For evening shifts, we want to know if they are scheduled for late night
+      const scheduledEveningStart = getScheduledStartTime(user, 'evening');
+
+      if (scheduledEveningStart) {
+        const [startHour] = scheduledEveningStart.split(':').map(Number);
+        // If the shift starts at 6 PM (18:00) or later
+        if (startHour >= 18) {
+          const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          workingDateCandidate = getDateInPakistan(yesterday);
+          console.log(`[ShiftDateFix] Detected early morning start (${pktHour} AM) for evening worker ${user?.username} (${scheduledEveningStart}). Shifting working date to ${workingDateCandidate}`);
+        }
+      }
+    } catch (err) {
+      console.error("[ShiftDateFix] Error checking user shift for date adjustment:", err);
+    }
+  }
+
+  const today = workingDateCandidate;
 
   // Get the most recent shift for this user
   const recentShifts = await storage.getShiftsByUser(userId, 2);
 
   if (!recentShifts || recentShifts.length === 0) {
-    // No previous shifts, use today
+    // No previous shifts, use the calculated working date
     return {
       workingDate: today,
       isNewDay: true,
@@ -490,10 +519,10 @@ async function getEffectiveWorkingDate(userId: string): Promise<{
 
   // If no clock out, shift is still active
   if (!lastClockOut) {
-    // Check if the shift is from today or yesterday
+    // Check if the shift is from our calculated working date or earlier
     const shiftDate = lastShift.date;
 
-    // If shift date is today, use today
+    // If shift date matches our current target date, continue with it
     if (shiftDate === today) {
       return {
         workingDate: today,

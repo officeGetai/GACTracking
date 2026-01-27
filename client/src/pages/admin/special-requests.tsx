@@ -392,12 +392,20 @@ export default function AdminSpecialRequestsPage() {
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter((r: any) =>
-        r.title.toLowerCase().includes(q) ||
-        r.details.toLowerCase().includes(q) ||
-        `${r.user?.firstName} ${r.user?.lastName}`.toLowerCase().includes(q)
-      );
+      const queryTerms = searchQuery.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
+
+      filtered = filtered.filter((r: any) => {
+        const searchableText = `
+          ${r.title || ""} 
+          ${r.details || ""} 
+          ${r.user?.firstName || ""} 
+          ${r.user?.lastName || ""} 
+          ${r.user?.username || ""} 
+          ${r.user?.department || ""}
+        `.toLowerCase();
+
+        return queryTerms.every(term => searchableText.includes(term));
+      });
     }
 
     filtered.sort((a: any, b: any) => {

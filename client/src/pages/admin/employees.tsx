@@ -572,13 +572,26 @@ export default function EmployeesPage() {
   };
 
   const filteredEmployees = employees?.filter((emp) => {
-    const fullName = `${emp.firstName} ${emp.lastName}`.toLowerCase();
-    const matchesSearch =
-      fullName.includes(searchQuery.toLowerCase()) ||
-      emp.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      emp.department?.toLowerCase().includes(searchQuery.toLowerCase());
+    // Search Filter
+    let matchesSearch = true;
+    if (searchQuery.trim()) {
+      const queryTerms = searchQuery.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
+      const searchableText = `
+        ${emp.firstName} 
+        ${emp.lastName} 
+        ${emp.username} 
+        ${emp.department || ""} 
+        ${emp.position || ""} 
+        ${emp.email || ""}
+      `.toLowerCase();
+
+      matchesSearch = queryTerms.every(term => searchableText.includes(term));
+    }
+
+    // Department Filter
     const matchesDepartment =
       departmentFilter === "all" || emp.department === departmentFilter;
+
     return matchesSearch && matchesDepartment;
   });
 

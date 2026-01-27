@@ -4340,3 +4340,49 @@ WhatsApp notifications sent: 1/1 successful for type 'report'.
 [DB] New client connected to pool
 [DB] New client connected to pool
 [ShiftScheduler] Found 12 employees with scheduled shifts
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Running check at 2026-01-26T01:13:12.585Z...
+[ShiftScheduler] Checking for absent employees at 2026-01-26T01:13:12.000Z (Pakistan date: 2026-01-26)...
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Found 0 active shifts to check.
+[ShiftScheduler] Found 12 employees with scheduled shifts
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Running check at 2026-01-26T01:18:12.585Z...
+[ShiftScheduler] Checking for absent employees at 2026-01-26T01:18:12.000Z (Pakistan date: 2026-01-26)...
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Found 0 active shifts to check.
+[ShiftScheduler] Found 12 employees with scheduled shifts
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Running check at 2026-01-26T01:23:12.585Z...
+[ShiftScheduler] Checking for absent employees at 2026-01-26T01:23:12.000Z (Pakistan date: 2026-01-26)...
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Found 0 active shifts to check.
+[ShiftScheduler] Found 12 employees with scheduled shifts
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Running check at 2026-01-26T08:35:07.967Z...
+[ShiftScheduler] Checking for absent employees at 2026-01-26T08:35:07.000Z (Pakistan date: 2026-01-26)...
+[DB] New client connected to pool
+[DB] New client connected to pool
+[DB] New client connected to pool
+[ShiftScheduler] Found 3 active shifts to check.
+[ShiftScheduler] Found 13 employees with scheduled shifts
+[DB] New client connected to pool
+[DB] New client connected to pool

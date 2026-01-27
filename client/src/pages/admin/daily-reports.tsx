@@ -373,12 +373,20 @@ export default function AdminDailyReportsPage() {
     let filtered = [...reports];
 
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((r: any) =>
-        `${r.user?.firstName} ${r.user?.lastName}`.toLowerCase().includes(query) ||
-        r.workDetails?.toLowerCase().includes(query) ||
-        r.user?.department?.toLowerCase().includes(query)
-      );
+      const queryTerms = searchQuery.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
+
+      filtered = filtered.filter((r: any) => {
+        const searchableText = `
+          ${r.user?.firstName || ""} 
+          ${r.user?.lastName || ""} 
+          ${r.user?.username || ""} 
+          ${r.user?.department || ""}
+          ${r.workDetails || ""}
+          ${r.notes || ""}
+        `.toLowerCase();
+
+        return queryTerms.every(term => searchableText.includes(term));
+      });
     }
 
     if (selectedDepartment !== "all") {

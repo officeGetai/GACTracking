@@ -46,6 +46,7 @@ import type { Shift, SafeUser, Break } from "@shared/schema";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // Types
 type ShiftWithUser = Shift & { user: SafeUser; breaks: Break[] };
@@ -120,115 +121,132 @@ export default function AdminShiftControl() {
     });
 
     const filteredData = controlData.filter(item => {
-        const searchMatch = `${item.employee.firstName} ${item.employee.lastName} ${item.employee.username}`
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase());
+        const query = searchQuery.toLowerCase().trim();
 
-        if (!searchMatch) return false;
+        // Search logic
+        if (query) {
+            const queryTerms = query.split(/\s+/).filter(term => term.length > 0);
+            const searchableText = `
+                ${item.employee.firstName} 
+                ${item.employee.lastName} 
+                ${item.employee.username} 
+                ${item.employee.department || ""}
+            `.toLowerCase();
 
+            const matchesSearch = queryTerms.every(term => searchableText.includes(term));
+            if (!matchesSearch) return false;
+        }
+
+        // Tab logic
         if (activeTab === "active") {
             return item.shift && (
                 (item.shift.morningClockIn && !item.shift.morningClockOut) ||
-                (item.shift.eveningClockIn && !item.shift.eveningClockOut)
+                (item.shift.eveningClockIn && !item.shift.eveningClockOut) ||
+                // Also include people on break as "active" in the shift context
+                (item.shift.breaks && item.shift.breaks.some(b => !b.endTime))
             );
         }
 
         if (activeTab === "not_started") {
-            return !item.shift;
+            // No shift record OR shift exists but no clock-ins yet
+            return !item.shift || (!item.shift.morningClockIn && !item.shift.eveningClockIn);
         }
 
         return true;
     });
 
+
     return (
-        <div className="min-h-full p-6 space-y-8 bg-slate-50/50 dark:bg-slate-950/20 relative overflow-hidden">
-            {/* Background Orbs */}
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+        <ScrollArea className="h-full">
+            <div className="min-h-full p-6 space-y-8 bg-slate-50/50 dark:bg-slate-950/20 relative">
+                {/* Background Orbs */}
+                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-                <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="space-y-1"
-                >
-                    <div className="flex items-center gap-3">
-                        <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-lg shadow-blue-500/20 animate-pulse-slow">
-                            <Zap className="w-6 h-6 text-white" />
-                        </div>
-                        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-blue-800 to-indigo-900 dark:from-white dark:via-blue-200 dark:to-indigo-400">
-                            Shift Command Center
-                        </h2>
-                    </div>
-                    <p className="text-muted-foreground flex items-center gap-2 pl-14">
-                        <Timer className="w-4 h-4" />
-                        Real-time administrative control over all employee shifts
-                    </p>
-                </motion.div>
-
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="flex flex-col sm:flex-row gap-3"
-                >
-                    <div className="relative group">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                        <Input
-                            placeholder="Search employees..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10 w-full sm:w-[300px] bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl focus:ring-blue-500/20"
-                        />
-                    </div>
-                </motion.div>
-            </div>
-
-            {/* Controls & Filter */}
-            <Tabs defaultValue="all" className="w-full relative z-10" onValueChange={setActiveTab}>
-                <div className="flex items-center justify-between gap-4 mb-6">
-                    <TabsList className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-slate-200/50 dark:border-slate-800/50 p-1 rounded-2xl h-12 shadow-sm">
-                        <TabsTrigger value="all" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md transition-all">
-                            All Members
-                        </TabsTrigger>
-                        <TabsTrigger value="active" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md">
-                            Working Now
-                        </TabsTrigger>
-                        <TabsTrigger value="not_started" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md">
-                            Not Started
-                        </TabsTrigger>
-                    </TabsList>
-
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => refetch()}
-                        className="rounded-xl h-10 px-4 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md"
+                {/* Header Section */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                    <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="space-y-1"
                     >
-                        <RotateCcw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
-                        Real-time Refresh
-                    </Button>
+                        <div className="flex items-center gap-3">
+                            <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-lg shadow-blue-500/20 animate-pulse-slow">
+                                <Zap className="w-6 h-6 text-white" />
+                            </div>
+                            <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-blue-800 to-indigo-900 dark:from-white dark:via-blue-200 dark:to-indigo-400">
+                                Shift Command Center
+                            </h2>
+                        </div>
+                        <p className="text-muted-foreground flex items-center gap-2 pl-14">
+                            <Timer className="w-4 h-4" />
+                            Real-time administrative control over all employee shifts
+                        </p>
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex flex-col sm:flex-row gap-3"
+                    >
+                        <div className="relative group">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                            <Input
+                                placeholder="Search employees..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-10 w-full sm:w-[300px] bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-slate-200 dark:border-slate-800 rounded-xl focus:ring-blue-500/20"
+                            />
+                        </div>
+                    </motion.div>
                 </div>
 
-                <TabsContent value={activeTab} className="mt-0">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <AnimatePresence mode="popLayout">
-                            {filteredData.map((item, index) => (
-                                <EmployeeControlCard
-                                    key={item.employee.id}
-                                    data={item}
-                                    index={index}
-                                    onStart={handleStartShift}
-                                    onResume={handleResumeShift}
-                                    onClose={handleForceClose}
-                                    isUpdating={controlMutation.isPending}
-                                />
-                            ))}
-                        </AnimatePresence>
+                {/* Controls & Filter */}
+                <Tabs defaultValue="all" className="w-full relative z-10" onValueChange={setActiveTab}>
+                    <div className="flex items-center justify-between gap-4 mb-6">
+                        <TabsList className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-slate-200/50 dark:border-slate-800/50 p-1 rounded-2xl h-12 shadow-sm">
+                            <TabsTrigger value="all" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md transition-all">
+                                All Members
+                            </TabsTrigger>
+                            <TabsTrigger value="active" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md">
+                                Working Now
+                            </TabsTrigger>
+                            <TabsTrigger value="not_started" className="rounded-xl px-6 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:shadow-md">
+                                Not Started
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => refetch()}
+                            className="rounded-xl h-10 px-4 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md"
+                        >
+                            <RotateCcw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
+                            Real-time Refresh
+                        </Button>
                     </div>
-                </TabsContent>
-            </Tabs>
-        </div>
+
+                    <TabsContent value={activeTab} className="mt-0">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <AnimatePresence mode="popLayout">
+                                {filteredData.map((item, index) => (
+                                    <EmployeeControlCard
+                                        key={item.employee.id}
+                                        data={item}
+                                        index={index}
+                                        onStart={handleStartShift}
+                                        onResume={handleResumeShift}
+                                        onClose={handleForceClose}
+                                        isUpdating={controlMutation.isPending}
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </div>
+                    </TabsContent>
+                </Tabs>
+            </div>
+        </ScrollArea>
     );
 }
 
