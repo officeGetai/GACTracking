@@ -1204,7 +1204,9 @@ export class DatabaseStorage implements IStorage {
 
   async getTargetItemsByUserAndMonth(userId: string, month: string): Promise<TargetItem[]> {
     const startDate = `${month}-01`;
-    const endDate = `${month}-31`;
+    const [year, mon] = month.split('-').map(Number);
+    const lastDay = new Date(year, mon, 0).getDate();
+    const endDate = `${month}-${String(lastDay).padStart(2, '0')}`;
 
     return await db
       .select({
@@ -1235,7 +1237,9 @@ export class DatabaseStorage implements IStorage {
 
   async getAllTargetItemsForMonth(month: string): Promise<(TargetItem & { user: SafeUser })[]> {
     const startDate = `${month}-01`;
-    const endDate = `${month}-31`;
+    const [year, mon] = month.split('-').map(Number);
+    const lastDay = new Date(year, mon, 0).getDate();
+    const endDate = `${month}-${String(lastDay).padStart(2, '0')}`;
 
     const records = await db
       .select({
