@@ -14,6 +14,7 @@ import {
   insertSpecialRequestSchema,
   insertRequestCommentSchema,
   BREAK_LIMITS,
+  BREAK_LIMITS_BY_SHIFT_TYPE,
   SPECIAL_REQUEST_STATUSES
 } from "@shared/schema";
 import { z } from "zod";
@@ -1501,6 +1502,12 @@ export async function registerRoutes(
         }
       }
 
+      // Determine break limits based on user's shift type and current period
+      const currentShiftPeriod = isEveningActive ? "evening" : "morning";
+      const userShiftType = (user?.shiftType || "one_shift") as keyof typeof BREAK_LIMITS_BY_SHIFT_TYPE;
+      const shiftBreakLimits = BREAK_LIMITS_BY_SHIFT_TYPE[userShiftType] || BREAK_LIMITS_BY_SHIFT_TYPE.one_shift;
+      const breaksAllowedInCurrentPeriod = (shiftBreakLimits.allowedPeriods as readonly string[]).includes(currentShiftPeriod);
+
       res.json({
         shift,
         activeBreak,
@@ -1515,6 +1522,14 @@ export async function registerRoutes(
         nextResetTime,
         cleanup: cleanup.staleBreaksEnded > 0 || cleanup.staleShiftsMarked > 0 ? cleanup : undefined,
         serverTime: now.toISOString(),
+        currentShiftPeriod,
+        breakLimits: {
+          prayer: shiftBreakLimits.prayer.maxPerDay,
+          meal: shiftBreakLimits.meal.maxPerDay,
+          urgent: shiftBreakLimits.urgent.maxPerDay,
+          breaksAllowed: breaksAllowedInCurrentPeriod,
+          allowedPeriods: shiftBreakLimits.allowedPeriods,
+        },
         shiftConfig: {
           shiftType: user?.shiftType || 'one_shift',
           shiftStartTime: user?.shiftStartTime,
@@ -1523,7 +1538,7 @@ export async function registerRoutes(
           morningShiftEnd: (user as any)?.morningShiftEnd,
           eveningShiftStart: (user as any)?.eveningShiftStart,
           eveningShiftEnd: (user as any)?.eveningShiftEnd,
-          openShiftRequiredHours: (user as any)?.openShiftRequiredHours, // Sent to frontend for UI display
+          openShiftRequiredHours: (user as any)?.openShiftRequiredHours,
           gracePeriodMinutes: GRACE_PERIOD_MINUTES,
           resetBufferHours: SHIFT_CONFIG.DAY_RESET_BUFFER_HOURS,
         }
@@ -2172,42 +2187,55 @@ export async function registerRoutes(
       // Determine period based on which shift is currently active
       const currentPeriod = isEveningActive ? "evening" : "morning";
 
+      // Get user to check shift type for break limits
+      const breakUser = await storage.getUser(userId);
+      const userShiftType = (breakUser?.shiftType || "one_shift") as keyof typeof BREAK_LIMITS_BY_SHIFT_TYPE;
+      const shiftBreakLimits = BREAK_LIMITS_BY_SHIFT_TYPE[userShiftType] || BREAK_LIMITS_BY_SHIFT_TYPE.one_shift;
+
+      // Check if breaks are allowed in the current period for this shift type
+      if (!(shiftBreakLimits.allowedPeriods as readonly string[]).includes(currentPeriod)) {
+        return res.status(400).json({
+          error: `Breaks are not allowed during the ${currentPeriod} shift for your shift type. Breaks can only be taken during the ${shiftBreakLimits.allowedPeriods.join("/")} shift.`
+        });
+      }
+
       // Check if already on break
       const activeBreak = await storage.getActiveBreakForDate(userId, workingDate);
       if (activeBreak) {
         return res.status(400).json({ error: "Already on a break. Please end your current break first" });
       }
 
-      // Check break limits for working date
+      // Check break limits for working date using shift-type-specific limits
       const todayBreaks = await storage.getBreaksByUserAndDate(userId, workingDate);
 
       if (type === "prayer") {
         const prayerBreaks = todayBreaks.filter(b => b.type === "prayer");
-        if (prayerBreaks.length >= BREAK_LIMITS.prayer.maxPerDay) {
+        const maxPrayer = shiftBreakLimits.prayer.maxPerDay;
+        if (prayerBreaks.length >= maxPrayer) {
           return res.status(400).json({
-            error: `Maximum prayer breaks (${BREAK_LIMITS.prayer.maxPerDay}) reached for today`,
+            error: `Maximum prayer breaks (${maxPrayer}) reached for today`,
             currentCount: prayerBreaks.length,
-            maxAllowed: BREAK_LIMITS.prayer.maxPerDay
+            maxAllowed: maxPrayer
           });
         }
       } else if (type === "meal") {
         const mealBreaks = todayBreaks.filter(b => b.type === "meal");
-        if (mealBreaks.length >= BREAK_LIMITS.meal.maxPerDay) {
+        const maxMeal = shiftBreakLimits.meal.maxPerDay;
+        if (mealBreaks.length >= maxMeal) {
           return res.status(400).json({
             error: "Meal break already taken today",
             currentCount: mealBreaks.length,
-            maxAllowed: BREAK_LIMITS.meal.maxPerDay
+            maxAllowed: maxMeal
           });
         }
       } else if (type === "urgent") {
-        const urgentBreaksThisPeriod = todayBreaks.filter(
-          b => b.type === "urgent" && b.shiftPeriod === currentPeriod
-        );
-        if (urgentBreaksThisPeriod.length >= BREAK_LIMITS.urgent.maxPerShift) {
+        const urgentBreaks = todayBreaks.filter(b => b.type === "urgent");
+        const maxUrgent = shiftBreakLimits.urgent.maxPerDay;
+        if (urgentBreaks.length >= maxUrgent) {
           return res.status(400).json({
-            error: `Maximum urgent breaks (${BREAK_LIMITS.urgent.maxPerShift}) reached for this ${currentPeriod} shift`,
-            currentCount: urgentBreaksThisPeriod.length,
-            maxAllowed: BREAK_LIMITS.urgent.maxPerShift
+            error: `Maximum urgent breaks (${maxUrgent}) reached for today`,
+            currentCount: urgentBreaks.length,
+            maxAllowed: maxUrgent
           });
         }
       }

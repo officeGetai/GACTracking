@@ -1,6 +1,6 @@
 import { storage } from "./storage";
 import { getWasenderSettings, notifyBreakExceeded, notifyShiftOvertime, notifyAutoClosed } from "./wasender";
-import { BREAK_LIMITS, type Shift } from "@shared/schema";
+import { BREAK_LIMITS, BREAK_LIMITS_BY_SHIFT_TYPE, type Shift } from "@shared/schema";
 import { differenceInMinutes, isAfter, addDays } from "date-fns";
 
 // Helper to parse "HH:MM" string to a Date object relative to a base date in Pakistan timezone
@@ -36,7 +36,11 @@ async function checkOverdueBreaks() {
         const now = new Date();
 
         for (const breakRecord of activeBreaks) {
-            const limits = BREAK_LIMITS[breakRecord.type as keyof typeof BREAK_LIMITS];
+            // Get shift-type-specific break limits for duration check
+            const userShiftType = (breakRecord.user.shiftType || "one_shift") as keyof typeof BREAK_LIMITS_BY_SHIFT_TYPE;
+            const shiftTypeLimits = BREAK_LIMITS_BY_SHIFT_TYPE[userShiftType] || BREAK_LIMITS_BY_SHIFT_TYPE.one_shift;
+            const breakType = breakRecord.type as keyof typeof shiftTypeLimits;
+            const limits = breakType in shiftTypeLimits ? (shiftTypeLimits as any)[breakType] : BREAK_LIMITS[breakRecord.type as keyof typeof BREAK_LIMITS];
             if (!limits || !limits.maxDuration) continue;
 
             const duration = differenceInMinutes(now, new Date(breakRecord.startTime));

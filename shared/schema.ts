@@ -522,9 +522,31 @@ export type LoginData = z.infer<typeof loginSchema>;
 // User without password for frontend
 export type SafeUser = Omit<User, "password">;
 
-// Break limits configuration
+// Break limits configuration per shift type
+export const BREAK_LIMITS_BY_SHIFT_TYPE = {
+  one_shift: {
+    prayer: { maxPerDay: 4, maxDuration: 16 },
+    meal: { maxPerDay: 1, maxDuration: 31 },
+    urgent: { maxPerDay: 2, maxDuration: 10 },
+    allowedPeriods: ["morning", "evening"] as const,
+  },
+  two_shifts: {
+    prayer: { maxPerDay: 3, maxDuration: 16 },
+    meal: { maxPerDay: 1, maxDuration: 31 },
+    urgent: { maxPerDay: 2, maxDuration: 10 },
+    allowedPeriods: ["morning"] as const,
+  },
+  open: {
+    prayer: { maxPerDay: 4, maxDuration: 16 },
+    meal: { maxPerDay: 1, maxDuration: 31 },
+    urgent: { maxPerDay: 2, maxDuration: 10 },
+    allowedPeriods: ["morning", "evening"] as const,
+  },
+} as const;
+
+// Default break limits (used by scheduler for duration checks)
 export const BREAK_LIMITS = {
-  prayer: { maxPerDay: 3, shiftPeriod: "any" as const, maxDuration: 16 },
+  prayer: { maxPerDay: 4, shiftPeriod: "any" as const, maxDuration: 16 },
   meal: { maxPerDay: 1, shiftPeriod: "any" as const, maxDuration: 31 },
   urgent: { maxPerShift: 2, shiftPeriod: "any" as const, maxDuration: 10 },
 } as const;

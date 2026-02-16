@@ -371,6 +371,14 @@ interface TodayStatus {
   breakCounts: { prayer: number; meal: number; urgent: number };
   activeBreak: Break | null;
   hasSubmittedReport: boolean;
+  currentShiftPeriod?: string;
+  breakLimits?: {
+    prayer: number;
+    meal: number;
+    urgent: number;
+    breaksAllowed: boolean;
+    allowedPeriods: readonly string[];
+  };
 }
 
 // === LOOM URL VALIDATION ===
@@ -2262,7 +2270,7 @@ export default function EmployeeDashboard() {
                     <p className="text-lg font-bold">
                       {(todayStatus?.breakCounts?.prayer || 0) +
                         (todayStatus?.breakCounts?.meal || 0) +
-                        (todayStatus?.breakCounts?.urgent || 0)}/6
+                        (todayStatus?.breakCounts?.urgent || 0)}/{(todayStatus?.breakLimits?.prayer ?? 4) + (todayStatus?.breakLimits?.meal ?? 1) + (todayStatus?.breakLimits?.urgent ?? 2)}
                     </p>
                   </div>
                 </div>
@@ -2430,12 +2438,23 @@ export default function EmployeeDashboard() {
                     </div>
                   ) : (
                     <div className="space-y-4">
+                      {todayStatus?.breakLimits?.breaksAllowed === false ? (
+                        <div className="p-4 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-center">
+                          <AlertCircle className="w-6 h-6 mx-auto mb-2 text-amber-500" />
+                          <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                            Breaks are not available during the {todayStatus?.currentShiftPeriod || "evening"} shift
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Breaks can only be taken during the {todayStatus?.breakLimits?.allowedPeriods?.join("/") || "morning"} shift
+                          </p>
+                        </div>
+                      ) : (
                       <div className="grid gap-3">
                         <BreakTypeCard
                           type="Prayer"
                           icon={Timer}
                           used={todayStatus?.breakCounts?.prayer || 0}
-                          max={3}
+                          max={todayStatus?.breakLimits?.prayer ?? 4}
                           isActive={selectedBreakType === "prayer"}
                           onSelect={() => setSelectedBreakType("prayer")}
                           disabled={!isActive}
@@ -2444,7 +2463,7 @@ export default function EmployeeDashboard() {
                           type="Meal"
                           icon={Utensils}
                           used={todayStatus?.breakCounts?.meal || 0}
-                          max={1}
+                          max={todayStatus?.breakLimits?.meal ?? 1}
                           isActive={selectedBreakType === "meal"}
                           onSelect={() => setSelectedBreakType("meal")}
                           disabled={!isActive}
@@ -2453,15 +2472,16 @@ export default function EmployeeDashboard() {
                           type="Urgent"
                           icon={Zap}
                           used={todayStatus?.breakCounts?.urgent || 0}
-                          max={2}
+                          max={todayStatus?.breakLimits?.urgent ?? 2}
                           isActive={selectedBreakType === "urgent"}
                           onSelect={() => setSelectedBreakType("urgent")}
                           disabled={!isActive}
                         />
                       </div>
+                      )}
                       <Button
                         className="w-full"
-                        disabled={!selectedBreakType || !isActive || isStartingBreak}
+                        disabled={!selectedBreakType || !isActive || isStartingBreak || todayStatus?.breakLimits?.breaksAllowed === false}
                         onClick={startBreak}
                       >
                         {isStartingBreak ? (
