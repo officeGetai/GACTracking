@@ -114,7 +114,10 @@ interface MonthlyStats {
   halfDays: number;
   totalLateMinutes: number;
   totalWorkMinutes: number;
+  totalNetWorkMinutes: number;
   totalBreakMinutes: number;
+  totalRequiredMinutes: number;
+  totalOvertimeMinutes: number;
   attendanceRate: number;
   avgWorkHoursPerDay: number;
   longestStreak: number;
@@ -451,8 +454,16 @@ function extractTimeValue(datetime: string | null): string {
 
 // Calculate required shift hours in minutes for overtime calculation
 // On Saturday (half day), required hours are capped at 5 hours (300 minutes)
+// Uses Pakistan timezone for day detection
 function calculateRequiredMinutes(user: SafeUser | null, date?: Date): number {
-  const isSaturdayDay = date ? date.getDay() === 6 : false;
+  let isSaturdayDay = false;
+  let isSundayDay = false;
+  if (date) {
+    const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', weekday: 'long' }).format(date);
+    isSaturdayDay = dayName === 'Saturday';
+    isSundayDay = dayName === 'Sunday';
+  }
+  if (isSundayDay) return 0;
   const saturdayMax = 5 * 60; // 300 minutes = 5 hours
 
   if (!user) {
@@ -1082,6 +1093,13 @@ export default function AttendancePage() {
     const totalLateMinutes = dayRecords.reduce((acc, r) => acc + r.lateMinutes, 0);
     const totalWorkMinutes = dayRecords.reduce((acc, r) => acc + r.workMinutes, 0);
     const totalBreakMinutes = dayRecords.reduce((acc, r) => acc + r.breakMinutes, 0);
+    const totalNetWorkMinutes = totalWorkMinutes - totalBreakMinutes;
+
+    const totalRequiredMinutes = workDayRecords.reduce((acc, r) => {
+      return acc + calculateRequiredMinutes(selectedEmployee ?? null, r.date);
+    }, 0);
+
+    const totalOvertimeMinutes = Math.max(0, totalNetWorkMinutes - totalRequiredMinutes);
 
     // Calculate streaks
     let longestStreak = 0;
@@ -1114,13 +1132,16 @@ export default function AttendancePage() {
       halfDays: 0,
       totalLateMinutes,
       totalWorkMinutes,
+      totalNetWorkMinutes: Math.max(0, totalNetWorkMinutes),
       totalBreakMinutes,
+      totalRequiredMinutes,
+      totalOvertimeMinutes,
       attendanceRate: workDayRecords.length > 0 ? Math.round((presentRecords.length / workDayRecords.length) * 100) : 0,
-      avgWorkHoursPerDay: presentRecords.length > 0 ? totalWorkMinutes / presentRecords.length / 60 : 0,
+      avgWorkHoursPerDay: presentRecords.length > 0 ? totalNetWorkMinutes / presentRecords.length / 60 : 0,
       longestStreak,
       currentStreak,
     };
-  }, [dayRecords]);
+  }, [dayRecords, selectedEmployee]);
 
   // Build calendar grid
   const calendarWeeks = useMemo(() => {
@@ -1180,7 +1201,10 @@ export default function AttendancePage() {
     rows.push(["Absent Days", monthlyStats.absentDays]);
     rows.push(["Late Days", monthlyStats.lateDays]);
     rows.push(["Total Late", formatDuration(monthlyStats.totalLateMinutes)]);
-    rows.push(["Total Work Hours", formatHours(monthlyStats.totalWorkMinutes)]);
+    rows.push(["Required Hours", formatHours(monthlyStats.totalRequiredMinutes)]);
+    rows.push(["Net Work Hours", formatHours(monthlyStats.totalNetWorkMinutes)]);
+    rows.push(["Total Breaks", formatDuration(monthlyStats.totalBreakMinutes)]);
+    rows.push(["Overtime", monthlyStats.totalOvertimeMinutes > 0 ? formatDuration(monthlyStats.totalOvertimeMinutes) : "0m"]);
     rows.push(["Attendance Rate", monthlyStats.attendanceRate + "%"]);
 
     const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
@@ -1392,9 +1416,9 @@ export default function AttendancePage() {
                   />
                   <StatCard
                     icon={Timer}
-                    label="Work Hours"
-                    value={formatHours(monthlyStats.totalWorkMinutes)}
-                    subValue={`~${monthlyStats.avgWorkHoursPerDay.toFixed(1)}h/day avg`}
+                    label="Net Work"
+                    value={formatHours(monthlyStats.totalNetWorkMinutes)}
+                    subValue={`of ${formatHours(monthlyStats.totalRequiredMinutes)} required`}
                     color="blue"
                     gradient="from-blue-500 to-indigo-600"
                   />
@@ -1406,9 +1430,11 @@ export default function AttendancePage() {
                     <BarChart3 className="h-4 w-4 text-violet-500" />
                     More Insights
                   </h4>
+                  <MiniStat icon={Target} label="Required Hours" value={formatHours(monthlyStats.totalRequiredMinutes)} color="bg-blue-500" />
+                  <MiniStat icon={Zap} label="Total Overtime" value={monthlyStats.totalOvertimeMinutes > 0 ? formatDuration(monthlyStats.totalOvertimeMinutes) : "0m"} color="bg-purple-500" />
+                  <MiniStat icon={Coffee} label="Total Breaks" value={formatDuration(monthlyStats.totalBreakMinutes)} color="bg-amber-500" />
                   <MiniStat icon={Flame} label="Current Streak" value={`${monthlyStats.currentStreak} days`} color="bg-orange-500" />
                   <MiniStat icon={Award} label="Longest Streak" value={`${monthlyStats.longestStreak} days`} color="bg-violet-500" />
-                  <MiniStat icon={Coffee} label="Total Breaks" value={formatDuration(monthlyStats.totalBreakMinutes)} color="bg-amber-500" />
                   <MiniStat icon={Clock} label="Total Late" value={formatDuration(monthlyStats.totalLateMinutes)} color="bg-red-500" />
                 </div>
               </div>

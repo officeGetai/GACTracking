@@ -12,7 +12,7 @@ import {
   Moon,
   TrendingUp,
   Timer,
-  CalendarDays,
+  Target,
   Loader2,
   RefreshCw,
   Sunrise,
@@ -310,6 +310,58 @@ function formatLateMinutes(lateMinutes: number | null | undefined): {
   };
 }
 
+function calculateRequiredMinutesForDay(user: any, date: Date | string): number {
+  const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : date;
+  const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', weekday: 'long' }).format(d);
+  const isSundayDay = dayName === 'Sunday';
+  if (isSundayDay) return 0;
+  const isSaturdayDay = dayName === 'Saturday';
+  const saturdayMax = 5 * 60;
+
+  if (!user) {
+    return isSaturdayDay ? saturdayMax : 8 * 60;
+  }
+
+  if (user.shiftType === "open_shift") {
+    const normal = parseFloat(user.openShiftRequiredHours || "8") * 60;
+    return isSaturdayDay ? Math.min(normal, saturdayMax) : normal;
+  }
+
+  if (user.shiftType === "one_shift" && user.shiftStartTime && user.shiftEndTime) {
+    const start = new Date(`1970-01-01T${user.shiftStartTime}`);
+    const end = new Date(`1970-01-01T${user.shiftEndTime}`);
+    let diff = (end.getTime() - start.getTime()) / 60000;
+    if (diff < 0) diff += 24 * 60;
+    return isSaturdayDay ? Math.min(diff, saturdayMax) : diff;
+  }
+
+  if (user.shiftType === "two_shifts") {
+    let total = 0;
+    if (user.morningShiftStart && user.morningShiftEnd) {
+      const start = new Date(`1970-01-01T${user.morningShiftStart}`);
+      const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
+      let diff = (end.getTime() - start.getTime()) / 60000;
+      if (diff < 0) diff += 24 * 60;
+      if (diff > 0) total += diff;
+    }
+    if (user.eveningShiftStart && user.eveningShiftEnd) {
+      const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
+      const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
+      let diff = (end.getTime() - start.getTime()) / 60000;
+      if (diff < 0) diff += 24 * 60;
+      if (diff > 0) total += diff;
+    }
+    const result = total > 0 ? total : 8 * 60;
+    return isSaturdayDay ? Math.min(result, saturdayMax) : result;
+  }
+
+  return isSaturdayDay ? saturdayMax : 8 * 60;
+}
+
+function formatHoursValue(minutes: number): string {
+  return (minutes / 60).toFixed(1) + "h";
+}
+
 // Compact Stat Card Component
 function StatCard({
   title,
@@ -521,6 +573,16 @@ export default function EmployeeAttendancePage() {
     const totalHours = Math.floor(totalNetMinutes / 60);
     const remainingMinutes = totalNetMinutes % 60;
 
+    // Calculate total required minutes for the month
+    // Mon-Fri = full shift hours, Saturday = 5 hours, Sunday = off
+    let totalRequiredMinutes = 0;
+    workingDayRecords.forEach((record) => {
+      const recordDate = parseISO(record.date);
+      totalRequiredMinutes += calculateRequiredMinutesForDay(user, recordDate);
+    });
+
+    const totalOvertimeMinutes = Math.max(0, totalNetMinutes - totalRequiredMinutes);
+
     // Calculate total late minutes
     let totalLateMinutes = 0;
     workingDayRecords.forEach((record) => {
@@ -543,12 +605,15 @@ export default function EmployeeAttendancePage() {
       halfDays,
       totalHours,
       remainingMinutes,
+      totalNetMinutes,
       totalLateMinutes,
       totalBreakMinutes,
+      totalRequiredMinutes,
+      totalOvertimeMinutes,
       attendanceRate,
       avgWorkHours,
     };
-  }, [attendanceRecords]);
+  }, [attendanceRecords, user]);
 
   // Active filter count
   const activeFilterCount = useMemo(() => {
@@ -687,7 +752,7 @@ export default function EmployeeAttendancePage() {
           </div>
 
           {/* Compact Stats Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <StatCard
               title="Present"
               value={stats.presentDays}
@@ -709,14 +774,21 @@ export default function EmployeeAttendancePage() {
               color="bg-red-50 border-red-200 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400"
             />
             <StatCard
-              title="Net Hours"
-              value={stats.totalHours}
-              subtitle={`${stats.remainingMinutes}m`}
+              title="Required"
+              value={formatHoursValue(stats.totalRequiredMinutes)}
+              subtitle="target"
+              icon={Target}
+              color="bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/30 dark:border-indigo-800 dark:text-indigo-400"
+            />
+            <StatCard
+              title="Net Work"
+              value={formatHoursValue(stats.totalNetMinutes)}
+              subtitle={`of ${formatHoursValue(stats.totalRequiredMinutes)}`}
               icon={Timer}
               color="bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
             />
             <StatCard
-              title="Break Time"
+              title="Breaks"
               value={formatDuration(stats.totalBreakMinutes)}
               icon={Coffee}
               color="bg-orange-50 border-orange-200 text-orange-700 dark:bg-orange-950/30 dark:border-orange-800 dark:text-orange-400"
@@ -726,12 +798,6 @@ export default function EmployeeAttendancePage() {
               value={`${stats.attendanceRate}%`}
               icon={TrendingUp}
               color="bg-purple-50 border-purple-200 text-purple-700 dark:bg-purple-950/30 dark:border-purple-800 dark:text-purple-400"
-            />
-            <StatCard
-              title="Avg/Day"
-              value={`${stats.avgWorkHours}h`}
-              icon={CalendarDays}
-              color="bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400"
             />
           </div>
 

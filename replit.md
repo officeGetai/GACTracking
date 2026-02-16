@@ -55,6 +55,16 @@ Preferred communication style: Simple, everyday language.
 └── migrations/       # Database migration files
 ```
 
+### Work Schedule & Attendance Rules
+- **Work Week**: Monday-Friday = full working days, Saturday = half day (5 hours), Sunday = off day
+- **Timezone**: All day-of-week detection uses Pakistan timezone (Asia/Karachi, UTC+5) via Intl.DateTimeFormat
+- **Monthly Required Hours**: Sum of per-day required hours (Mon-Fri x employee's shift hours + Saturdays x 5h, Sundays = 0)
+- **Net Work Hours**: Gross working time (clock-out - clock-in) minus total break time
+- **Overtime**: Net work hours - Required hours (only positive values)
+- **Sunday Block**: Backend blocks clock-in on Sundays; scheduler skips absent marking on Sundays
+- **Saturday Cap**: Required hours capped at 5 hours (300 minutes) on Saturdays regardless of shift configuration
+- **Grace Period**: 15 minutes for late determination
+
 ### Design Patterns
 - **Shared schema**: Database schema and validation schemas defined once in `shared/schema.ts`, used by both frontend and backend
 - **Storage abstraction**: `IStorage` interface in `server/storage.ts` abstracts database operations
