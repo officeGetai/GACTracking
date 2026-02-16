@@ -37,6 +37,42 @@ function parseUserTime(dateStr: string, timeStr: string): Date {
 }
 
 /**
+ * Get day name in Pakistan timezone for a given date
+ */
+function getDayNamePakistan(date: Date | string): string {
+    const d = typeof date === 'string' ? new Date(date + 'T12:00:00+05:00') : date;
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', weekday: 'long' }).format(d);
+}
+
+/**
+ * Calculate required shift duration in minutes from start/end time strings
+ * Handles cross-midnight shifts and Saturday 5-hour cap
+ */
+function calcRequiredMinutesFromTimes(startTimeStr: string, endTimeStr: string, shiftDate: string): number {
+    const [startH, startM] = startTimeStr.split(':').map(Number);
+    const [endH, endM] = endTimeStr.split(':').map(Number);
+    const startTotal = startH * 60 + (startM || 0);
+    const endTotal = endH * 60 + (endM || 0);
+    let diff = endTotal - startTotal;
+    if (diff <= 0) diff += 24 * 60;
+
+    const dayName = getDayNamePakistan(shiftDate);
+    if (dayName === 'Saturday') {
+        diff = Math.min(diff, 300);
+    }
+
+    return diff;
+}
+
+/**
+ * Calculate the dynamic completion time based on actual clock-in + required minutes
+ * This is when the employee will have fulfilled their required hours
+ */
+function calcDynamicCompletionTime(clockInTime: Date, requiredMinutes: number): Date {
+    return new Date(clockInTime.getTime() + requiredMinutes * 60 * 1000);
+}
+
+/**
  * Calculate the correct end date/time for a shift, handling cross-midnight scenarios
  * 
  * This function uses the scheduledDate (if available) to determine the correct end time.
