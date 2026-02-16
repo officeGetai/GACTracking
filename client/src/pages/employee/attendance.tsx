@@ -304,7 +304,7 @@ function formatLateMinutes(lateMinutes: number | null | undefined): {
 
   return {
     text,
-    fullText: `${lateMinutes} minutes late (after ${GRACE_PERIOD_MINUTES}-min grace period)`,
+    fullText: `${lateMinutes} minutes late from scheduled start`,
     color: lateMinutes > 30 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400",
     isLate: true,
   };
@@ -748,11 +748,12 @@ export default function EmployeeAttendancePage() {
                 <p className="font-medium">Attendance Policy</p>
                 <p className="text-muted-foreground">
                   You are allowed a {GRACE_PERIOD_MINUTES}-minute grace period after your scheduled
-                  start time. Late minutes are only counted after this grace period.
+                  start time. If you arrive within this window, you are marked on time.
+                  If you arrive after the grace period, the full delay from your scheduled start is counted as late.
                 </p>
                 <p className="text-muted-foreground">
                   <span className="font-medium">Example:</span> If your shift starts at 9:00 AM and
-                  you clock in at 9:20 AM, you'll be marked {20 - GRACE_PERIOD_MINUTES} minutes late.
+                  you clock in at 9:20 AM, you'll be marked 20 minutes late.
                 </p>
               </div>
             </PopoverContent>
@@ -999,7 +1000,7 @@ export default function EmployeeAttendancePage() {
                   {stats.totalLateMinutes >= 60
                     ? `${Math.floor(stats.totalLateMinutes / 60)}h ${stats.totalLateMinutes % 60}m`
                     : `${stats.totalLateMinutes}m`}
-                </strong> across {stats.lateDays} day{stats.lateDays !== 1 ? "s" : ""} (after {GRACE_PERIOD_MINUTES}-min grace)
+                </strong> across {stats.lateDays} day{stats.lateDays !== 1 ? "s" : ""}
               </span>
             </div>
           )}

@@ -170,8 +170,8 @@ function calculateLateMinutesWithGrace(
       return 0;
     }
 
-    // Late minutes = total delay - grace period
-    let lateMinutes = totalDelayMinutes - gracePeriodMinutes;
+    // Late minutes = total delay from scheduled start (grace period only determines if late, not subtracted)
+    let lateMinutes = totalDelayMinutes;
 
     // Cap at reasonable maximum (4 hours = 240 minutes)
     if (lateMinutes > 240) {
@@ -1707,7 +1707,7 @@ export async function registerRoutes(
       // Create activity log with detailed info
       let logDetails = "On time";
       if (lateMinutes > 0) {
-        logDetails = `Late by ${lateMinutes} minutes (after ${GRACE_PERIOD_MINUTES}min grace period)`;
+        logDetails = `Late by ${lateMinutes} minutes`;
       } else if (scheduledStartTime) {
         logDetails = `On time (within ${GRACE_PERIOD_MINUTES}min grace period)`;
       } else if (isOpenShift) {
@@ -1737,7 +1737,7 @@ export async function registerRoutes(
       // Prepare response message
       let message = `Morning shift started for ${workingDate}`;
       if (lateMinutes > 0) {
-        message += ` (${lateMinutes}m late after ${GRACE_PERIOD_MINUTES}m grace period)`;
+        message += ` (${lateMinutes}m late)`;
       } else if (scheduledStartTime) {
         message += ` (on time)`;
       } else if (isOpenShift) {
@@ -1985,7 +1985,7 @@ export async function registerRoutes(
       // Create activity log with detailed info
       let logDetails = "Evening shift started on time";
       if (lateMinutes > 0) {
-        logDetails = `Evening shift - Late by ${lateMinutes} minutes (after ${GRACE_PERIOD_MINUTES}min grace period)`;
+        logDetails = `Evening shift - Late by ${lateMinutes} minutes`;
       } else if (scheduledStartTime) {
         logDetails = `Evening shift started on time (within ${GRACE_PERIOD_MINUTES}min grace period)`;
       }
@@ -2012,7 +2012,7 @@ export async function registerRoutes(
       // Prepare response message
       let message = `Evening shift started for ${workingDate}`;
       if (lateMinutes > 0) {
-        message += ` (${lateMinutes}m late after ${GRACE_PERIOD_MINUTES}m grace period)`;
+        message += ` (${lateMinutes}m late)`;
       } else if (scheduledStartTime) {
         message += ` (on time)`;
       }
