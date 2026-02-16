@@ -1485,7 +1485,15 @@ export default function EmployeeDashboard() {
     let morningMessage = "";
     let morningLockReason: "not_started" | "ended" | null = null;
 
-    if (morningTimes) {
+    const isMorningActive = !!(shift?.morningClockIn && !shift?.morningClockOut);
+    const isEveningActive = !!(shift?.eveningClockIn && !shift?.eveningClockOut);
+
+    if (isMorningActive) {
+      isMorningUnlocked = true;
+      if (morningTimes && now >= morningTimes.end) {
+        morningMessage = "Overtime - please end your shift";
+      }
+    } else if (morningTimes) {
       if (now < morningTimes.unlock) {
         isMorningLocked = true;
         morningLockReason = "not_started";
@@ -1495,16 +1503,10 @@ export default function EmployeeDashboard() {
         if (now < morningTimes.start) {
           morningMessage = "Early clock-in available";
         }
-      } else { // now >= morningTimes.end
-        // Check if active
-        if (shift?.morningClockIn && !shift?.morningClockOut) {
-          isMorningUnlocked = true;
-          morningMessage = "Overtime - please end your shift";
-        } else {
-          isMorningLocked = true;
-          morningLockReason = "ended";
-          morningMessage = "Morning shift time ended";
-        }
+      } else {
+        isMorningLocked = true;
+        morningLockReason = "ended";
+        morningMessage = "Morning shift time ended";
       }
     } else {
       morningMessage = "Morning shift not configured";
@@ -1517,7 +1519,12 @@ export default function EmployeeDashboard() {
     let eveningMessage = "";
     let eveningLockReason: "not_started" | "ended" | null = null;
 
-    if (eveningTimes) {
+    if (isEveningActive) {
+      isEveningUnlocked = true;
+      if (eveningTimes && now >= eveningTimes.end) {
+        eveningMessage = "Overtime - please end your shift";
+      }
+    } else if (eveningTimes) {
       if (now < eveningTimes.unlock) {
         isEveningLocked = true;
         eveningLockReason = "not_started";
@@ -1527,15 +1534,10 @@ export default function EmployeeDashboard() {
         if (now < eveningTimes.start) {
           eveningMessage = "Early clock-in available";
         }
-      } else { // now >= eveningTimes.end
-        if (shift?.eveningClockIn && !shift?.eveningClockOut) {
-          isEveningUnlocked = true;
-          eveningMessage = "Overtime - please end your shift";
-        } else {
-          isEveningLocked = true;
-          eveningLockReason = "ended";
-          eveningMessage = "Evening shift time ended";
-        }
+      } else {
+        isEveningLocked = true;
+        eveningLockReason = "ended";
+        eveningMessage = "Evening shift time ended";
       }
     } else {
       eveningMessage = "Evening shift not configured";
