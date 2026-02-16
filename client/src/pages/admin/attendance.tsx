@@ -6,11 +6,11 @@ import {
   startOfMonth,
   endOfMonth,
   eachDayOfInterval,
-  isWeekend,
   isFuture,
   getDay,
   subMonths,
   addMonths,
+  isSunday,
 } from "date-fns";
 import {
   Calendar as CalendarIcon,
@@ -220,7 +220,7 @@ function calculateBreakMinutes(shift: ShiftWithBreaks | null): number {
 
 function getDayStatus(shift: ShiftWithBreaks | null, date: Date): DayRecord["status"] {
   if (isFuture(date)) return "future";
-  if (isWeekend(date)) return "weekend";
+  if (isSunday(date)) return "weekend";
   
   // No shift = absent
   if (!shift) return "absent";
@@ -450,19 +450,26 @@ function extractTimeValue(datetime: string | null): string {
 }
 
 // Calculate required shift hours in minutes for overtime calculation
-function calculateRequiredMinutes(user: SafeUser | null): number {
-  if (!user) return 8 * 60; // Default 8 hours
+// On Saturday (half day), required hours are capped at 5 hours (300 minutes)
+function calculateRequiredMinutes(user: SafeUser | null, date?: Date): number {
+  const isSaturdayDay = date ? date.getDay() === 6 : false;
+  const saturdayMax = 5 * 60; // 300 minutes = 5 hours
+
+  if (!user) {
+    return isSaturdayDay ? saturdayMax : 8 * 60;
+  }
   
   if (user.shiftType === "open_shift") {
-    return parseFloat(user.openShiftRequiredHours || "8") * 60;
+    const normal = parseFloat(user.openShiftRequiredHours || "8") * 60;
+    return isSaturdayDay ? Math.min(normal, saturdayMax) : normal;
   }
   
   if (user.shiftType === "one_shift" && user.shiftStartTime && user.shiftEndTime) {
     const start = new Date(`1970-01-01T${user.shiftStartTime}`);
     const end = new Date(`1970-01-01T${user.shiftEndTime}`);
     let diff = (end.getTime() - start.getTime()) / 60000;
-    if (diff < 0) diff += 24 * 60; // Handle cross-midnight
-    return diff;
+    if (diff < 0) diff += 24 * 60;
+    return isSaturdayDay ? Math.min(diff, saturdayMax) : diff;
   }
   
   if (user.shiftType === "two_shifts") {
@@ -471,20 +478,21 @@ function calculateRequiredMinutes(user: SafeUser | null): number {
       const start = new Date(`1970-01-01T${user.morningShiftStart}`);
       const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
       let diff = (end.getTime() - start.getTime()) / 60000;
-      if (diff < 0) diff += 24 * 60; // Handle cross-midnight
+      if (diff < 0) diff += 24 * 60;
       if (diff > 0) total += diff;
     }
     if (user.eveningShiftStart && user.eveningShiftEnd) {
       const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
       const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
       let diff = (end.getTime() - start.getTime()) / 60000;
-      if (diff < 0) diff += 24 * 60; // Handle cross-midnight
+      if (diff < 0) diff += 24 * 60;
       if (diff > 0) total += diff;
     }
-    return total > 0 ? total : 8 * 60;
+    const result = total > 0 ? total : 8 * 60;
+    return isSaturdayDay ? Math.min(result, saturdayMax) : result;
   }
   
-  return 8 * 60;
+  return isSaturdayDay ? saturdayMax : 8 * 60;
 }
 
 // Day Detail Panel
@@ -534,7 +542,7 @@ function DayDetailPanel({ record, onEdit, onDelete, isEditing, isSaving, employe
   const netWorkMinutes = record.workMinutes - record.breakMinutes;
   
   // Calculate overtime: Net Work Minutes - Required Minutes (only positive = overtime)
-  const requiredMinutes = calculateRequiredMinutes(employee ?? null);
+  const requiredMinutes = calculateRequiredMinutes(employee ?? null, record.date);
   const overtimeMinutes = netWorkMinutes > requiredMinutes ? netWorkMinutes - requiredMinutes : 0;
 
   const handleSave = () => {

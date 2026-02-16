@@ -15,7 +15,9 @@ import {
   insertRequestCommentSchema,
   BREAK_LIMITS,
   BREAK_LIMITS_BY_SHIFT_TYPE,
-  SPECIAL_REQUEST_STATUSES
+  SPECIAL_REQUEST_STATUSES,
+  WORK_SCHEDULE,
+  SATURDAY_REQUIRED_HOURS,
 } from "@shared/schema";
 import { z } from "zod";
 import {
@@ -48,6 +50,21 @@ async function getWasenderSettings(): Promise<WasenderSettings> {
 }
 
 const SALT_ROUNDS = 10;
+
+// Helper: Get current day of week in Pakistan timezone (0=Sunday, 6=Saturday)
+function getPakistanDayOfWeek(): number {
+  const dayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', weekday: 'long' }).format(new Date());
+  const days: Record<string, number> = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+  return days[dayName] ?? new Date().getDay();
+}
+
+function isSundayInPakistan(): boolean {
+  return getPakistanDayOfWeek() === 0;
+}
+
+function isSaturdayInPakistan(): boolean {
+  return getPakistanDayOfWeek() === 6;
+}
 
 // ============= SHIFT CONFIGURATION =============
 // NOTE: User-specific shift times from database take precedence over these constants.
@@ -1508,6 +1525,13 @@ export async function registerRoutes(
       const shiftBreakLimits = BREAK_LIMITS_BY_SHIFT_TYPE[userShiftType] || BREAK_LIMITS_BY_SHIFT_TYPE.one_shift;
       const breaksAllowedInCurrentPeriod = (shiftBreakLimits.allowedPeriods as readonly string[]).includes(currentShiftPeriod);
 
+      // Determine day type (full/half/off) based on current date in Pakistan timezone
+      const currentDayOfWeek = getPakistanDayOfWeek() as keyof typeof WORK_SCHEDULE;
+      const daySchedule = WORK_SCHEDULE[currentDayOfWeek];
+      const dayType = daySchedule.type;
+      const isOffDay = dayType === "off";
+      const isHalfDay = dayType === "half";
+
       res.json({
         shift,
         activeBreak,
@@ -1523,6 +1547,11 @@ export async function registerRoutes(
         cleanup: cleanup.staleBreaksEnded > 0 || cleanup.staleShiftsMarked > 0 ? cleanup : undefined,
         serverTime: now.toISOString(),
         currentShiftPeriod,
+        dayType,
+        isOffDay,
+        isHalfDay,
+        dayLabel: daySchedule.label,
+        saturdayRequiredHours: SATURDAY_REQUIRED_HOURS,
         breakLimits: {
           prayer: shiftBreakLimits.prayer.maxPerDay,
           meal: shiftBreakLimits.meal.maxPerDay,
@@ -1574,6 +1603,11 @@ export async function registerRoutes(
     try {
       const userId = req.session.userId!;
       const now = new Date();
+
+      // Block clock-in on Sundays (off day) - Pakistan timezone aware
+      if (isSundayInPakistan()) {
+        return res.status(400).json({ error: "Sunday is an off day. Clock-in is not allowed." });
+      }
 
       // Get effective working date
       const { workingDate, isNewDay } = await getEffectiveWorkingDate(userId);
@@ -1893,6 +1927,11 @@ export async function registerRoutes(
     try {
       const userId = req.session.userId!;
       const now = new Date();
+
+      // Block clock-in on Sundays (off day) - Pakistan timezone aware
+      if (isSundayInPakistan()) {
+        return res.status(400).json({ error: "Sunday is an off day. Clock-in is not allowed." });
+      }
 
       // Get effective working date
       const { workingDate, isNewDay } = await getEffectiveWorkingDate(userId);

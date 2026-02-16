@@ -372,6 +372,11 @@ interface TodayStatus {
   activeBreak: Break | null;
   hasSubmittedReport: boolean;
   currentShiftPeriod?: string;
+  dayType?: "full" | "half" | "off";
+  isOffDay?: boolean;
+  isHalfDay?: boolean;
+  dayLabel?: string;
+  saturdayRequiredHours?: number;
   breakLimits?: {
     prayer: number;
     meal: number;
@@ -1670,37 +1675,44 @@ export default function EmployeeDashboard() {
   const currentLockReason = activeTab === "morning" ? morningLockReason : eveningLockReason;
 
   // --- Dynamic Target Logic ---
+  // On Saturday (half day), target is capped at 5 hours (18000 seconds)
+  const saturdayMaxSeconds = (todayStatus?.saturdayRequiredHours || 5) * 3600;
   const totalTargetSeconds = useMemo(() => {
+    const isHalfDayToday = todayStatus?.isHalfDay;
+    let target = 8 * 3600;
+
     if (isOpenShiftUser) {
-      return parseFloat(user?.openShiftRequiredHours || "8") * 3600;
-    }
-    if (user?.shiftType === "one_shift" && user?.shiftStartTime && user?.shiftEndTime) {
+      target = parseFloat(user?.openShiftRequiredHours || "8") * 3600;
+    } else if (user?.shiftType === "one_shift" && user?.shiftStartTime && user?.shiftEndTime) {
       const start = new Date(`1970-01-01T${user.shiftStartTime}`);
       const end = new Date(`1970-01-01T${user.shiftEndTime}`);
       let diff = (end.getTime() - start.getTime()) / 1000;
       if (diff < 0) diff += 24 * 3600;
-      return diff;
-    }
-    if (user?.shiftType === "two_shifts") {
+      target = diff;
+    } else if (user?.shiftType === "two_shifts") {
       let total = 0;
       if (user.morningShiftStart && user.morningShiftEnd) {
         const start = new Date(`1970-01-01T${user.morningShiftStart}`);
         const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
-        if (diff < 0) diff += 24 * 3600; // Handle cross-midnight
+        if (diff < 0) diff += 24 * 3600;
         if (diff > 0) total += diff;
       }
       if (user.eveningShiftStart && user.eveningShiftEnd) {
         const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
         const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
-        if (diff < 0) diff += 24 * 3600; // Handle cross-midnight
+        if (diff < 0) diff += 24 * 3600;
         if (diff > 0) total += diff;
       }
-      return total > 0 ? total : 8 * 3600;
+      target = total > 0 ? total : 8 * 3600;
     }
-    return 8 * 3600;
-  }, [user]);
+
+    if (isHalfDayToday) {
+      target = Math.min(target, saturdayMaxSeconds);
+    }
+    return target;
+  }, [user, todayStatus?.isHalfDay, saturdayMaxSeconds]);
 
   const targetHoursString = useMemo(() => {
     return `${Math.round(totalTargetSeconds / 3600 * 10) / 10}h`;
@@ -2041,6 +2053,28 @@ export default function EmployeeDashboard() {
           </Alert>
         )}
 
+        {/* Off Day (Sunday) Alert */}
+        {todayStatus?.isOffDay && (
+          <Alert className="bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800">
+            <Sun className="h-4 w-4 text-blue-600" />
+            <AlertTitle className="text-blue-800 dark:text-blue-300">Off Day - Sunday</AlertTitle>
+            <AlertDescription className="text-blue-700 dark:text-blue-400">
+              Today is a rest day. Clock-in is not available on Sundays.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Half Day (Saturday) Alert */}
+        {todayStatus?.isHalfDay && (
+          <Alert className="bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800">
+            <Clock className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-800 dark:text-amber-300">Half Day - Saturday</AlertTitle>
+            <AlertDescription className="text-amber-700 dark:text-amber-400">
+              Today is a half working day. Required working hours: {todayStatus?.saturdayRequiredHours || 5} hours.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Locked Shift Alert */}
         {isCurrentShiftLocked && !isStarted && !isOpenShiftUser && (
           <Alert className={cn(
@@ -2115,7 +2149,7 @@ export default function EmployeeDashboard() {
                                 : "bg-gradient-to-br from-emerald-400 to-emerald-600 hover:from-emerald-500 hover:to-emerald-700 shadow-emerald-500/30 border-emerald-400/30 hover:scale-105"
                             )}
                             onClick={startShift}
-                            disabled={isOnBreak || isStartingShift || (isCurrentShiftLocked && !isOpenShiftUser)}
+                            disabled={isOnBreak || isStartingShift || (isCurrentShiftLocked && !isOpenShiftUser) || todayStatus?.isOffDay}
                           >
                             {isStartingShift ? (
                               <Loader2 className="w-10 h-10 animate-spin" />

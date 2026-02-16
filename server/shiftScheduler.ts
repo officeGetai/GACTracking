@@ -566,6 +566,14 @@ async function checkAndMarkAbsentEmployees() {
     const today = getTodayInPakistan();
     console.log(`[ShiftScheduler] Checking for absent employees at ${now.toISOString()} (Pakistan date: ${today})...`);
 
+    // Skip absent marking on Sundays (off day)
+    // Use Intl formatter with Pakistan timezone to get the correct day of week
+    const pkDayOfWeek = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', weekday: 'long' }).format(new Date());
+    if (pkDayOfWeek === 'Sunday') {
+        console.log(`[ShiftScheduler] Sunday is an off day - skipping absent marking`);
+        return;
+    }
+
     try {
         // Get all employees with scheduled shifts (one_shift or two_shifts)
         const scheduledEmployees = await storage.getScheduledShiftEmployees();

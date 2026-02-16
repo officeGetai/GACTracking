@@ -1,7 +1,7 @@
 // client/src/pages/employee/attendance.tsx
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isWeekend, isBefore, isToday, startOfDay } from "date-fns";
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, isToday, startOfDay, isSunday, isSaturday } from "date-fns";
 import {
   Clock,
   Calendar,
@@ -180,7 +180,7 @@ function getStatusLabel(status: string) {
     case "incomplete":
       return "Incomplete";
     case "weekend":
-      return "Weekend";
+      return "Off Day";
     case "future":
       return "Upcoming";
     default:
@@ -400,7 +400,7 @@ export default function EmployeeAttendancePage() {
       const existingShift = shiftMap.get(dateStr);
       const dayStart = startOfDay(day);
       const isFutureDay = isBefore(today, dayStart);
-      const isWeekendDay = isWeekend(day);
+      const isSundayDay = isSunday(day);
       const isBeforeJoining = joiningDate && isBefore(dayStart, joiningDate);
 
       // If shift exists, use it
@@ -430,8 +430,8 @@ export default function EmployeeAttendancePage() {
         };
       }
 
-      // Weekend
-      if (isWeekendDay) {
+      // Sunday = Off day (only Sunday, Saturday is a working half day)
+      if (isSundayDay) {
         return {
           id: `weekend-${dateStr}`,
           date: dateStr,
@@ -648,7 +648,7 @@ export default function EmployeeAttendancePage() {
                   checked={hideWeekends}
                   onCheckedChange={setHideWeekends}
                 >
-                  Hide Weekends
+                  Hide Off Days (Sundays)
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={!hideFuture}

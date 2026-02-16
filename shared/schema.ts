@@ -551,6 +551,35 @@ export const BREAK_LIMITS = {
   urgent: { maxPerShift: 2, shiftPeriod: "any" as const, maxDuration: 10 },
 } as const;
 
+// Work Schedule Configuration
+// Monday-Friday = full working day, Saturday = half day (5 hours), Sunday = off
+export const WORK_SCHEDULE = {
+  0: { type: "off", label: "Sunday - Off Day", requiredHours: 0 },
+  1: { type: "full", label: "Monday", requiredHours: 9 },
+  2: { type: "full", label: "Tuesday", requiredHours: 9 },
+  3: { type: "full", label: "Wednesday", requiredHours: 9 },
+  4: { type: "full", label: "Thursday", requiredHours: 9 },
+  5: { type: "full", label: "Friday", requiredHours: 9 },
+  6: { type: "half", label: "Saturday - Half Day", requiredHours: 5 },
+} as const;
+
+export const SATURDAY_REQUIRED_HOURS = 5;
+
+export function getDayType(date: Date): "full" | "half" | "off" {
+  const day = date.getDay();
+  if (day === 0) return "off";
+  if (day === 6) return "half";
+  return "full";
+}
+
+export function isSundayOff(date: Date): boolean {
+  return date.getDay() === 0;
+}
+
+export function isSaturdayHalfDay(date: Date): boolean {
+  return date.getDay() === 6;
+}
+
 // Departments list
 export const DEPARTMENTS = [
   "Development",
