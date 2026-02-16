@@ -959,6 +959,8 @@ export class DatabaseStorage implements IStorage {
         endTime: breaks.endTime,
         durationMinutes: breaks.durationMinutes,
         lateNotificationSent: breaks.lateNotificationSent,
+        lastExceedNotificationAt: breaks.lastExceedNotificationAt,
+        exceedNotificationCount: breaks.exceedNotificationCount,
         createdAt: breaks.createdAt,
         user: getSafeUserSelectFields()
       })

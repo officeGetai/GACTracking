@@ -128,6 +128,8 @@ export const breaks = pgTable("breaks", {
   endTime: timestamp("end_time"),
   durationMinutes: integer("duration_minutes"),
   lateNotificationSent: boolean("late_notification_sent").default(false),
+  lastExceedNotificationAt: timestamp("last_exceed_notification_at"),
+  exceedNotificationCount: integer("exceed_notification_count").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

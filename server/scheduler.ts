@@ -27,39 +27,61 @@ export function startScheduler() {
     }, 60 * 1000);
 }
 
+const BREAK_EXCEED_REMINDER_INTERVAL = 5; // minutes between reminder notifications
+
 async function checkOverdueBreaks() {
     try {
         const activeBreaks = await storage.getAllMonitorableBreaks();
         const settings = await getWasenderSettings();
+        const now = new Date();
 
         for (const breakRecord of activeBreaks) {
-            if (breakRecord.lateNotificationSent) continue;
-
             const limits = BREAK_LIMITS[breakRecord.type as keyof typeof BREAK_LIMITS];
             if (!limits || !limits.maxDuration) continue;
 
-            const duration = differenceInMinutes(new Date(), new Date(breakRecord.startTime));
+            const duration = differenceInMinutes(now, new Date(breakRecord.startTime));
 
             if (duration > limits.maxDuration) {
-                console.log(`Break overdue for user ${breakRecord.userId}. Duration: ${duration}m, Limit: ${limits.maxDuration}m`);
+                const exceededBy = duration - limits.maxDuration;
+                const notificationCount = breakRecord.exceedNotificationCount || 0;
+                const lastNotifiedAt = breakRecord.lastExceedNotificationAt ? new Date(breakRecord.lastExceedNotificationAt) : null;
 
-                // Send Notification
-                const employeeForNotify = {
-                    fullName: `${breakRecord.user.firstName} ${breakRecord.user.lastName}`,
-                    department: breakRecord.user.department || "N/A",
-                    phone: breakRecord.user.phone,
-                    whatsappPreference: breakRecord.user.whatsappPreference
-                };
+                let shouldNotify = false;
 
-                await notifyBreakExceeded(
-                    employeeForNotify,
-                    breakRecord.type,
-                    duration - limits.maxDuration,
-                    settings
-                );
+                if (!lastNotifiedAt) {
+                    shouldNotify = true;
+                } else {
+                    const minutesSinceLastNotification = differenceInMinutes(now, lastNotifiedAt);
+                    if (minutesSinceLastNotification >= BREAK_EXCEED_REMINDER_INTERVAL) {
+                        shouldNotify = true;
+                    }
+                }
 
-                // Mark as notified
-                await storage.updateBreak(breakRecord.id, { lateNotificationSent: true });
+                if (shouldNotify) {
+                    const newCount = notificationCount + 1;
+                    console.log(`Break overdue for user ${breakRecord.userId}. Duration: ${duration}m, Limit: ${limits.maxDuration}m, Exceeded by: ${exceededBy}m, Reminder #${newCount}`);
+
+                    const employeeForNotify = {
+                        fullName: `${breakRecord.user.firstName} ${breakRecord.user.lastName}`,
+                        department: breakRecord.user.department || "N/A",
+                        phone: breakRecord.user.phone,
+                        whatsappPreference: breakRecord.user.whatsappPreference
+                    };
+
+                    await notifyBreakExceeded(
+                        employeeForNotify,
+                        breakRecord.type,
+                        exceededBy,
+                        settings,
+                        newCount
+                    );
+
+                    await storage.updateBreak(breakRecord.id, {
+                        lateNotificationSent: true,
+                        lastExceedNotificationAt: now,
+                        exceedNotificationCount: newCount,
+                    });
+                }
             }
         }
     } catch (error) {

@@ -347,20 +347,30 @@ export async function notifyBreakExceeded(
   employee: Employee,
   breakType: string,
   exceededByMinutes: number,
-  settings: WasenderSettings
+  settings: WasenderSettings,
+  reminderCount: number = 1
 ): Promise<void> {
   const now = getPakistanTime();
 
-  const message = `🚨 BREAK TIME EXCEEDED!
+  const isFirstNotification = reminderCount <= 1;
+  const headerText = isFirstNotification
+    ? `🚨 BREAK TIME EXCEEDED!`
+    : `🚨 REMINDER #${reminderCount} - BREAK STILL EXCEEDED!`;
+
+  const urgencyText = reminderCount >= 3
+    ? `🔴 URGENT: This is reminder #${reminderCount}. Please close your break immediately!`
+    : `👉 Please return to work immediately.`;
+
+  const message = `${headerText}
 
 👤 Employee: ${employee.fullName}
 🏢 Department: ${employee.department}
 📋 Break Type: ${breakType}
 ⚠️ Exceeded By: ${exceededByMinutes} minutes
+🔔 Notification: ${isFirstNotification ? "First alert" : `Reminder #${reminderCount} (sent every 5 min)`}
 
-👉 Please return to work immediately.`;
+${urgencyText}`;
 
-  // ALERT notification - isEndingNotification = false (goes to group only)
   await sendNotification(message, employee, settings, "alert", false);
 }
 
