@@ -24,13 +24,19 @@ Preferred communication style: Simple, everyday language.
 - **Language**: TypeScript with ESM modules
 - **API Design**: RESTful JSON API with `/api` prefix
 - **Session Management**: Express-session with cookie-based authentication
-- **Password Security**: Bcrypt for password hashing
 
 ### Data Storage
 - **Database**: PostgreSQL
 - **ORM**: Drizzle ORM with type-safe schema definitions
 - **Schema Location**: `shared/schema.ts` contains all table definitions
 - **Migrations**: Drizzle Kit for database migrations (`drizzle-kit push`)
+
+### Security
+- **API secrets**: ClickUp API key, team ID, and space ID stored in Replit Secrets (not hardcoded)
+- **WaSender token masking**: API token is masked (last 4 chars only) in all admin API responses; masked tokens are ignored on update
+- **Session secret**: Uses `SESSION_SECRET` env var with cryptographically random fallback (note: random fallback rotates on restart, so set SESSION_SECRET in production)
+- **Employee data**: `getAllUsers()` selects specific columns excluding password hashes
+- **Password Security**: Bcrypt for password hashing
 
 ### Authentication & Authorization
 - **Session-based authentication** using express-session
