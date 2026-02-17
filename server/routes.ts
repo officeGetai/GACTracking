@@ -733,7 +733,7 @@ export async function registerRoutes(
         tableName: "session",
         createTableIfMissing: true,
       }),
-      secret: process.env.SESSION_SECRET || "gac-trackings-secret-key-2024",
+      secret: process.env.SESSION_SECRET || require("crypto").randomBytes(32).toString("hex"),
       resave: false,
       saveUninitialized: false,
       rolling: true, // Refresh session on every request
@@ -1387,7 +1387,11 @@ export async function registerRoutes(
   app.get("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
       const config = await storage.getWasenderConfig();
-      res.json(config || { instanceId: "", apiToken: "", requestsGroupId: null, shiftReportsGroupId: null, trackingAlertsGroupId: null, isActive: false });
+      const safeConfig = config ? {
+        ...config,
+        apiToken: config.apiToken ? `${"*".repeat(Math.max(0, config.apiToken.length - 4))}${config.apiToken.slice(-4)}` : "",
+      } : { instanceId: "", apiToken: "", requestsGroupId: null, shiftReportsGroupId: null, trackingAlertsGroupId: null, isActive: false };
+      res.json(safeConfig);
     } catch (error) {
       console.error("Failed to fetch WASENDER config:", error);
       res.status(500).json({ error: "Failed to fetch WASENDER config" });
@@ -1397,8 +1401,16 @@ export async function registerRoutes(
   app.post("/api/admin/wasender-config", requireAdmin, async (req, res) => {
     try {
       const { instanceId, apiToken, requestsGroupId, shiftReportsGroupId, trackingAlertsGroupId, isActive } = req.body;
-      const config = await storage.updateWasenderConfig({ instanceId, apiToken, requestsGroupId, shiftReportsGroupId, trackingAlertsGroupId, isActive });
-      res.json(config);
+      const updateData: any = { instanceId, requestsGroupId, shiftReportsGroupId, trackingAlertsGroupId, isActive };
+      if (apiToken && !apiToken.includes("****")) {
+        updateData.apiToken = apiToken;
+      }
+      const config = await storage.updateWasenderConfig(updateData);
+      const safeConfig = config ? {
+        ...config,
+        apiToken: config.apiToken ? `${"*".repeat(Math.max(0, config.apiToken.length - 4))}${config.apiToken.slice(-4)}` : "",
+      } : config;
+      res.json(safeConfig);
     } catch (error) {
       console.error("Failed to update WASENDER config:", error);
       res.status(500).json({ error: "Failed to update WASENDER config" });
