@@ -270,11 +270,14 @@ export async function notifyShiftEnd(
   breaksTaken: number,
   totalBreakMinutes: number,
   lateMinutes: number = 0,
-  settings: WasenderSettings
+  settings: WasenderSettings,
+  requiredMinutes: number = 480
 ): Promise<void> {
   const now = getPakistanTime();
   const workedHours = Math.floor(totalWorkedMinutes / 60);
   const workedMins = totalWorkedMinutes % 60;
+  const reqHours = Math.floor(requiredMinutes / 60);
+  const reqMins = requiredMinutes % 60;
 
   // Convert shift start time to Pakistan time
   const utcStartTime = shiftStartTime.getTime() + (shiftStartTime.getTimezoneOffset() * 60000);
@@ -291,7 +294,7 @@ export async function notifyShiftEnd(
 
 📊 Shift Summary:
 ✅ Total Worked Hours: ${workedHours}h ${workedMins}m
-🕒 Required Working Hours: 8h 0m
+🕒 Required Working Hours: ${reqHours}h ${reqMins}m
 ☕ Breaks Taken: ${breaksTaken}
 ☕ Total break Duration: ${totalBreakMinutes} minutes
 

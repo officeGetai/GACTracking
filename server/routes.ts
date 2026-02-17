@@ -66,6 +66,44 @@ function isSaturdayInPakistan(): boolean {
   return getPakistanDayOfWeek() === 6;
 }
 
+function calcTimeDiffMinutes(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  let diff = (eh * 60 + em) - (sh * 60 + sm);
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
+}
+
+function getShiftRequiredMinutes(user: any, shiftPeriod: 'morning' | 'evening' | 'full'): number {
+  const isSaturday = isSaturdayInPakistan();
+  const saturdayCap = 300; // 5 hours in minutes
+
+  if (user.shiftType === 'two_shifts') {
+    let requiredMinutes = 0;
+    if (shiftPeriod === 'morning' && user.morningShiftStart && user.morningShiftEnd) {
+      requiredMinutes = calcTimeDiffMinutes(user.morningShiftStart, user.morningShiftEnd);
+    } else if (shiftPeriod === 'evening' && user.eveningShiftStart && user.eveningShiftEnd) {
+      requiredMinutes = calcTimeDiffMinutes(user.eveningShiftStart, user.eveningShiftEnd);
+    }
+    if (requiredMinutes <= 0) requiredMinutes = 240;
+    return isSaturday ? Math.min(requiredMinutes, saturdayCap) : requiredMinutes;
+  }
+
+  if (user.shiftType === 'open') {
+    const configuredHours = parseFloat(user.openShiftRequiredHours || '8');
+    const requiredMinutes = Math.round(configuredHours * 60);
+    return isSaturday ? Math.min(requiredMinutes, saturdayCap) : requiredMinutes;
+  }
+
+  // one_shift
+  if (user.shiftStartTime && user.shiftEndTime) {
+    const diff = calcTimeDiffMinutes(user.shiftStartTime, user.shiftEndTime);
+    return isSaturday ? Math.min(diff, saturdayCap) : diff;
+  }
+
+  return isSaturday ? saturdayCap : 480;
+}
+
 // ============= SHIFT CONFIGURATION =============
 // NOTE: User-specific shift times from database take precedence over these constants.
 // These are only used as fallbacks for open shifts or when user data is missing.
@@ -1902,6 +1940,8 @@ export async function registerRoutes(
       const totalBreakMinutes = morningBreaks.reduce((sum, b) => sum + (b.durationMinutes || 0), 0);
 
       if (user) {
+        const shiftPeriod = user.shiftType === 'two_shifts' ? 'morning' : 'full';
+        const requiredMinutes = getShiftRequiredMinutes(user, shiftPeriod);
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
             {
@@ -1915,7 +1955,8 @@ export async function registerRoutes(
             morningBreaks.length,
             totalBreakMinutes,
             shift.morningLateMinutes || 0,
-            settings
+            settings,
+            requiredMinutes
           )
         ).catch(err => console.error("WhatsApp notification error:", err));
       }
@@ -2179,6 +2220,7 @@ export async function registerRoutes(
       const totalBreakMinutes = eveningBreaks.reduce((sum, b) => sum + (b.durationMinutes || 0), 0);
 
       if (user) {
+        const requiredMinutes = getShiftRequiredMinutes(user, 'evening');
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
             {
@@ -2192,7 +2234,8 @@ export async function registerRoutes(
             eveningBreaks.length,
             totalBreakMinutes,
             shift.eveningLateMinutes || 0,
-            settings
+            settings,
+            requiredMinutes
           )
         ).catch(err => console.error("WhatsApp notification error:", err));
       }
