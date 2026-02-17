@@ -1491,7 +1491,7 @@ export default function EmployeeDashboard() {
     if (isMorningActive) {
       isMorningUnlocked = true;
       if (morningTimes && now >= morningTimes.end) {
-        morningMessage = "Overtime - please end your shift";
+        morningMessage = "Please end your shift";
       }
     } else if (morningTimes) {
       if (now < morningTimes.unlock) {
@@ -1522,7 +1522,7 @@ export default function EmployeeDashboard() {
     if (isEveningActive) {
       isEveningUnlocked = true;
       if (eveningTimes && now >= eveningTimes.end) {
-        eveningMessage = "Overtime - please end your shift";
+        eveningMessage = "Please end your shift";
       }
     } else if (eveningTimes) {
       if (now < eveningTimes.unlock) {
@@ -1859,7 +1859,7 @@ export default function EmployeeDashboard() {
     setIsExtendingOvertime(true);
     await handleMutation(
       apiRequest("POST", "/api/employee/extend-overtime"),
-      "Overtime window extended! Auto-close timer has been reset."
+      "Shift extended! Auto-close timer has been reset."
     );
     setIsExtendingOvertime(false);
   };
@@ -2333,7 +2333,7 @@ export default function EmployeeDashboard() {
                       <Timer className="w-5 h-5 text-purple-600" />
                     </div>
                     <div>
-                      <p className="text-xs text-purple-600 font-medium">Overtime Earned</p>
+                      <p className="text-xs text-purple-600 font-medium">Extra Hours</p>
                       <p className="text-2xl font-bold text-purple-700 dark:text-purple-400" data-testid="text-overtime-value">{overtimeString}</p>
                     </div>
                   </div>
@@ -2406,8 +2406,8 @@ export default function EmployeeDashboard() {
                       <Timer className="w-5 h-5 text-purple-600" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium text-purple-800 dark:text-purple-400">Working Overtime</p>
-                      <p className="text-xs text-purple-600">Your scheduled shift time has ended. Still working?</p>
+                      <p className="font-medium text-purple-800 dark:text-purple-400">Still Working?</p>
+                      <p className="text-xs text-purple-600">Your scheduled shift time has ended. Extend if still working.</p>
                     </div>
                     <Button
                       onClick={extendOvertime}
@@ -2420,7 +2420,7 @@ export default function EmployeeDashboard() {
                       ) : (
                         <Clock className="w-4 h-4" />
                       )}
-                      Extend Overtime
+                      Extend Shift
                     </Button>
                   </div>
                 </CardContent>

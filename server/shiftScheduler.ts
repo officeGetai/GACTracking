@@ -234,7 +234,7 @@ async function checkAndAutoCloseShifts() {
                         if (!alreadySent1) {
                             console.log(`[ShiftScheduler] Sending 1st overtime reminder to ${user.username}`);
 
-                            const reminderMessage = `If you are still working, please press the "Extend Overtime Window" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
+                            const reminderMessage = `If you are still working, please press the "Extend Shift" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
 
                             try {
                                 await sendPersonalWhatsApp(user.phone, reminderMessage, wasenderSettings);
@@ -242,7 +242,7 @@ async function checkAndAutoCloseShifts() {
                                 if (wasenderSettings.trackingAlertsGroupId) {
                                     await sendGroupWhatsApp(
                                         wasenderSettings.trackingAlertsGroupId,
-                                        `[Overtime Reminder] ${fullName} received first overtime reminder. Required hours completed 1 hour ago.`,
+                                        `[Shift Reminder] ${fullName} received first shift extension reminder. Required hours completed 1 hour ago.`,
                                         wasenderSettings
                                     );
                                 }
@@ -277,7 +277,7 @@ async function checkAndAutoCloseShifts() {
                             if (!alreadySent2) {
                                 console.log(`[ShiftScheduler] Sending 2nd overtime reminder to ${user.username}`);
 
-                                const reminderMessage = `If you are still working, please press the "Extend Overtime Window" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
+                                const reminderMessage = `If you are still working, please press the "Extend Shift" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
 
                                 try {
                                     await sendPersonalWhatsApp(user.phone, reminderMessage, wasenderSettings);
@@ -285,7 +285,7 @@ async function checkAndAutoCloseShifts() {
                                     if (wasenderSettings.trackingAlertsGroupId) {
                                         await sendGroupWhatsApp(
                                             wasenderSettings.trackingAlertsGroupId,
-                                            `[Overtime Reminder] ${fullName} received second overtime reminder. Required hours completed 2 hours ago.`,
+                                            `[Shift Reminder] ${fullName} received second shift extension reminder. Required hours completed 2 hours ago.`,
                                             wasenderSettings
                                         );
                                     }
