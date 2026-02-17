@@ -217,49 +217,9 @@ async function checkAndAutoCloseShifts() {
                     console.log(`[ShiftScheduler] ${user.username} ${overtimeShiftPeriod}: clockIn=${overtimeClockInTime.toISOString()}, required=${requiredMinutes}min, completionTime=${dynamicCompletionTime.toISOString()}, hoursSinceCompletion=${hoursSinceCompletion.toFixed(2)}`);
 
                     // ============================================================
-                    // Reminder 0: When required hours are completed
-                    // Sent when actual clock-in + required hours is reached
+                    // Reminder 0: DISABLED - Shift completion reminder
+                    // Previously sent when actual clock-in + required hours was reached
                     // ============================================================
-                    if (hoursSinceCompletion >= 0 && hoursSinceCompletion < OVERTIME_REMINDER_1_HOURS) {
-                        const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
-                        const alreadySentShiftEnd = logs.some(log =>
-                            log.action === "shift_end_reminder_sent" &&
-                            (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000)
-                        );
-
-                        if (!alreadySentShiftEnd) {
-                            console.log(`[ShiftScheduler] Sending shift completion reminder to ${user.username} - required ${requiredHoursStr} completed`);
-
-                            const shiftEndMessage = `Your ${overtimeShiftPeriod} shift at GAC has now completed its required working hours (${requiredHoursStr}).
-
-If you're done working, please:
-1. Submit your shift report
-2. Clock out from the GAC Tracking app
-
-If you're still working, press the "Extend Overtime Window" button to continue. Otherwise, your shift will auto-close in ${AUTO_CLOSE_DELAY_HOURS} hours.`;
-
-                            try {
-                                await sendPersonalWhatsApp(user.phone, shiftEndMessage, wasenderSettings);
-
-                                if (wasenderSettings.trackingAlertsGroupId) {
-                                    await sendGroupWhatsApp(
-                                        wasenderSettings.trackingAlertsGroupId,
-                                        `[Required Hours Complete] ${fullName}'s ${overtimeShiftPeriod} shift has completed its required ${requiredHoursStr}. Waiting for clock-out or overtime extension.`,
-                                        wasenderSettings
-                                    );
-                                }
-
-                                await storage.createActivityLog({
-                                    userId: user.id,
-                                    action: "shift_end_reminder_sent",
-                                    details: `Sent shift completion reminder for ${overtimeShiftPeriod} shift - required ${requiredHoursStr} completed (dynamic: clockIn ${overtimeClockInTime.toISOString()} + ${requiredMinutes}min)`,
-                                    timestamp: now
-                                });
-                            } catch (err) {
-                                console.error(`[ShiftScheduler] Failed to send shift completion reminder to ${user.username}:`, err);
-                            }
-                        }
-                    }
 
                     // ============================================================
                     // Reminder 1: 1 hour after required hours completed
