@@ -75,9 +75,9 @@ const SHIFT_CONFIG = {
 };
 // ============= CLICKUP API CONFIGURATION =============
 const CLICKUP_CONFIG = {
-  API_KEY: process.env.CLICKUP_API_KEY || "pk_3677597_Y9QGK34UCENA4JYMT1MR8RJVCJN0MDMC",
-  TEAM_ID: process.env.CLICKUP_TEAM_ID || "9009178151",
-  SPACE_ID: process.env.CLICKUP_SPACE_ID || "90090394573",
+  API_KEY: process.env.CLICKUP_API_KEY || "",
+  TEAM_ID: process.env.CLICKUP_TEAM_ID || "",
+  SPACE_ID: process.env.CLICKUP_SPACE_ID || "",
   BASE_URL: "https://api.clickup.com/api/v2",
   CACHE_DURATION: 5 * 60 * 1000, // 5 minutes
 };
