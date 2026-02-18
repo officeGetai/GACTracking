@@ -4,11 +4,9 @@ import { notifyShiftReportReminder, sendPersonalWhatsApp, sendGroupWhatsApp, typ
 
 // Configuration
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
-const AUTO_CLOSE_DELAY_HOURS = 3; // Close 3 hours after shift end time
 const AUTO_ABSENT_DELAY_HOURS = 2; // Mark absent 2 hours after scheduled clock-in time
-const OVERTIME_REMINDER_1_HOURS = 1; // First overtime reminder at +1 hour after shift end
-const OVERTIME_REMINDER_2_HOURS = 2; // Second overtime reminder at +2 hours after shift end
-const OVERTIME_EXTENSION_HOURS = 1; // Each button press extends auto-close by 1 hour
+const EXTENSION_REMINDER_DELAY_HOURS = 1; // Send extend reminder 1 hour after scheduled end (or after last extension)
+const AUTO_CLOSE_AFTER_REMINDER_MINUTES = 10; // Auto-close 10 minutes after reminder if no extension
 
 // Helper to get WASENDER settings
 async function getWasenderSettings(): Promise<WasenderSettings> {
@@ -172,312 +170,108 @@ async function checkAndAutoCloseShifts() {
             if (!user) continue;
 
             // ============================================================
-            // 1. DYNAMIC SHIFT COMPLETION & OVERTIME REMINDERS
-            // Reminders are based on actual clock-in time + required hours
-            // NOT on the static scheduled end time
+            // SHIFT EXTENSION REMINDERS & AUTO-CLOSE
+            // Based on scheduled shift end time (not clock-in + required hours)
+            // Flow: End time + 1h → reminder → 10 min to extend → auto-close with base end time
+            // Skips: open shifts and Saturday
             // ============================================================
 
-            // Skip for Open Shifts
-            if (user.shiftType !== 'open') {
-                let overtimeEndTime: string | null = null;
-                let overtimeStartTime: string | null = null;
-                let overtimeClockInTime: Date | null = null;
-                let overtimeShiftPeriod: string = "";
+            if (user.shiftType === 'open') continue;
 
-                // Get the active shift details for overtime reminders
-                if (shift.morningClockIn && !shift.morningClockOut) {
-                    overtimeEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
-                    overtimeStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
-                    overtimeClockInTime = new Date(shift.morningClockIn);
-                    overtimeShiftPeriod = "morning";
-                } else if (shift.eveningClockIn && !shift.eveningClockOut) {
-                    overtimeEndTime = user.eveningShiftEnd;
-                    overtimeStartTime = user.eveningShiftStart;
-                    overtimeClockInTime = new Date(shift.eveningClockIn);
-                    overtimeShiftPeriod = "evening";
-                }
+            const dayName = getDayNamePakistan(shiftDate);
+            if (dayName === 'Saturday') continue;
 
-                if (overtimeEndTime && overtimeStartTime && overtimeClockInTime && user.phone) {
-                    const fullName = `${user.firstName} ${user.lastName}`;
+            // Determine which shift period is currently active
+            let activeEndTime: string | null = null;
+            let activeStartTime: string | null = null;
+            let activeClockInTime: Date | null = null;
+            let activeShiftPeriod: string = "";
+            let activeClockOutField: string = "";
 
-                    // Calculate required shift duration in minutes from scheduled times
-                    // Uses actual clock-in time for Saturday detection (not shiftDate)
-                    const requiredMinutes = calcRequiredMinutesFromTimes(overtimeStartTime, overtimeEndTime, overtimeClockInTime);
-
-                    // Dynamic completion time = actual clock-in + required hours
-                    // Example: Schedule 3PM-9PM (6h required), employee starts at 4PM
-                    //          Completion time = 4PM + 6h = 10PM (not 9PM)
-                    const dynamicCompletionTime = calcDynamicCompletionTime(overtimeClockInTime, requiredMinutes);
-
-                    // Calculate hours since required hours were fulfilled
-                    const hoursSinceCompletion = (now.getTime() - dynamicCompletionTime.getTime()) / (1000 * 60 * 60);
-
-                    const requiredHoursStr = `${Math.floor(requiredMinutes / 60)}h ${requiredMinutes % 60 > 0 ? (requiredMinutes % 60) + 'm' : ''}`.trim();
-
-                    console.log(`[ShiftScheduler] ${user.username} ${overtimeShiftPeriod}: clockIn=${overtimeClockInTime.toISOString()}, required=${requiredMinutes}min, completionTime=${dynamicCompletionTime.toISOString()}, hoursSinceCompletion=${hoursSinceCompletion.toFixed(2)}`);
-
-                    // ============================================================
-                    // Reminder 0: DISABLED - Shift completion reminder
-                    // Previously sent when actual clock-in + required hours was reached
-                    // ============================================================
-
-                    // ============================================================
-                    // Reminder 1: 1 hour after required hours completed
-                    // ============================================================
-                    if (hoursSinceCompletion >= OVERTIME_REMINDER_1_HOURS && hoursSinceCompletion < OVERTIME_REMINDER_2_HOURS) {
-                        const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
-                        const alreadySent1 = logs.some(log =>
-                            log.action === "overtime_reminder_1_sent" &&
-                            (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000)
-                        );
-
-                        if (!alreadySent1) {
-                            console.log(`[ShiftScheduler] Sending 1st overtime reminder to ${user.username}`);
-
-                            const reminderMessage = `If you are still working, please press the "Extend Shift" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
-
-                            try {
-                                await sendPersonalWhatsApp(user.phone, reminderMessage, wasenderSettings);
-
-                                if (wasenderSettings.trackingAlertsGroupId) {
-                                    await sendGroupWhatsApp(
-                                        wasenderSettings.trackingAlertsGroupId,
-                                        `[Shift Reminder] ${fullName} received first shift extension reminder. Required hours completed 1 hour ago.`,
-                                        wasenderSettings
-                                    );
-                                }
-
-                                await storage.createActivityLog({
-                                    userId: user.id,
-                                    action: "overtime_reminder_1_sent",
-                                    details: `Sent first overtime reminder for ${overtimeShiftPeriod} shift (1h after required hours completion)`,
-                                    timestamp: now
-                                });
-                            } catch (err) {
-                                console.error(`[ShiftScheduler] Failed to send overtime reminder 1 to ${user.username}:`, err);
-                            }
-                        }
-                    }
-
-                    // ============================================================
-                    // Reminder 2: 2 hours after required hours completed
-                    // (only if employee extended at +1h)
-                    // ============================================================
-                    if (hoursSinceCompletion >= OVERTIME_REMINDER_2_HOURS && hoursSinceCompletion < AUTO_CLOSE_DELAY_HOURS) {
-                        const hasExtended = shift.lastOvertimeExtension &&
-                            new Date(shift.lastOvertimeExtension).getTime() > (dynamicCompletionTime.getTime() + OVERTIME_REMINDER_1_HOURS * 60 * 60 * 1000);
-
-                        if (hasExtended) {
-                            const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
-                            const alreadySent2 = logs.some(log =>
-                                log.action === "overtime_reminder_2_sent" &&
-                                (now.getTime() - new Date(log.timestamp).getTime()) < (2 * 60 * 60 * 1000)
-                            );
-
-                            if (!alreadySent2) {
-                                console.log(`[ShiftScheduler] Sending 2nd overtime reminder to ${user.username}`);
-
-                                const reminderMessage = `If you are still working, please press the "Extend Shift" button on the GAC Tracking app to continue your shift. If you are not working, please close your shift from the app.`;
-
-                                try {
-                                    await sendPersonalWhatsApp(user.phone, reminderMessage, wasenderSettings);
-
-                                    if (wasenderSettings.trackingAlertsGroupId) {
-                                        await sendGroupWhatsApp(
-                                            wasenderSettings.trackingAlertsGroupId,
-                                            `[Shift Reminder] ${fullName} received second shift extension reminder. Required hours completed 2 hours ago.`,
-                                            wasenderSettings
-                                        );
-                                    }
-
-                                    await storage.createActivityLog({
-                                        userId: user.id,
-                                        action: "overtime_reminder_2_sent",
-                                        details: `Sent second overtime reminder for ${overtimeShiftPeriod} shift (2h after required hours completion)`,
-                                        timestamp: now
-                                    });
-                                } catch (err) {
-                                    console.error(`[ShiftScheduler] Failed to send overtime reminder 2 to ${user.username}:`, err);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ============================================================
-            // 2. AUTO-CLOSE WARNING (15 minutes before auto-close)
-            // ============================================================
-
-            // Skip for Open Shifts
-            if (user.shiftType !== 'open') {
-                let warningEndTime: string | null = null;
-                let warningStartTime: string | null = null;
-                let warningClockInTime: Date | null = null;
-                let warningShiftPeriod: string = "";
-
-                // Get the active shift details for warning
-                if (shift.morningClockIn && !shift.morningClockOut) {
-                    warningEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
-                    warningStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
-                    warningClockInTime = new Date(shift.morningClockIn);
-                    warningShiftPeriod = "morning";
-                } else if (shift.eveningClockIn && !shift.eveningClockOut) {
-                    warningEndTime = user.eveningShiftEnd;
-                    warningStartTime = user.eveningShiftStart;
-                    warningClockInTime = new Date(shift.eveningClockIn);
-                    warningShiftPeriod = "evening";
-                }
-
-                if (warningEndTime && warningClockInTime && user.phone) {
-                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, warningStartTime, warningEndTime, warningClockInTime);
-
-                    // Calculate effective auto-close time considering extensions
-                    let effectiveAutoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
-
-                    // If employee extended overtime, add extension time
-                    if (shift.lastOvertimeExtension) {
-                        const extensionCount = shift.overtimeReminderCount || 1;
-                        effectiveAutoCloseTime = new Date(effectiveAutoCloseTime.getTime() + (extensionCount * OVERTIME_EXTENSION_HOURS * 60 * 60 * 1000));
-                    }
-
-                    const minutesUntilAutoClose = (effectiveAutoCloseTime.getTime() - now.getTime()) / (1000 * 60);
-
-                    // Send warning if we're within 15 minutes of auto-close AND shift hasn't auto-closed yet
-                    if (minutesUntilAutoClose > 0 && minutesUntilAutoClose <= 15) {
-                        // Check if warning was already sent
-                        const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
-                        const alreadyWarned = logs.some(log =>
-                            log.action === "auto_close_warning_sent" &&
-                            (now.getTime() - new Date(log.timestamp).getTime()) < (1 * 60 * 60 * 1000) // Within last 1 hour
-                        );
-
-                        if (!alreadyWarned) {
-                            console.log(`[ShiftScheduler] Sending auto-close warning to ${user.username}`);
-
-                            const warningMessage = `Your ${warningShiftPeriod} shift will be AUTOMATICALLY CLOSED in ${Math.ceil(minutesUntilAutoClose)} minutes. Please submit your report and end your shift now to avoid forced closure.`;
-
-                            try {
-                                await notifyShiftReportReminder({
-                                    fullName: `${user.firstName} ${user.lastName}`,
-                                    phone: user.phone,
-                                    whatsappPreference: user.whatsappPreference
-                                }, warningMessage, wasenderSettings);
-
-                                await storage.createActivityLog({
-                                    userId: user.id,
-                                    action: "auto_close_warning_sent",
-                                    details: `Sent auto-close warning: ${Math.ceil(minutesUntilAutoClose)} minutes remaining`,
-                                    timestamp: now
-                                });
-                            } catch (err) {
-                                console.error(`[ShiftScheduler] Failed to send auto-close warning to ${user.username}:`, err);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ============================================================
-            // 3. AUTO-CLOSE LOGIC (1 Hour after End Time)
-            // ============================================================
-
-            // Skip Auto-Close for Open Shifts (they close manually or via max-duration stale check)
-            if (user.shiftType === 'open') {
-                continue;
-            }
-
-            // --- CHECK MORNING SHIFT ---
             if (shift.morningClockIn && !shift.morningClockOut) {
-                let scheduledEndTime: string | null = null;
-                let scheduledStartTime: string | null = null;
-
-                if (user.shiftType === 'one_shift') {
-                    scheduledEndTime = user.shiftEndTime;
-                    scheduledStartTime = user.shiftStartTime;
-                } else if (user.shiftType === 'two_shifts') {
-                    scheduledEndTime = user.morningShiftEnd;
-                    scheduledStartTime = user.morningShiftStart;
-                }
-
-                if (scheduledEndTime) {
-                    // Use the new cross-midnight aware function with scheduledDate
-                    const clockInTime = new Date(shift.morningClockIn);
-                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
-
-                    // Calculate effective auto-close time considering overtime extensions
-                    let autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
-
-                    // If employee extended overtime, add extension time
-                    if (shift.lastOvertimeExtension) {
-                        const extensionCount = shift.overtimeReminderCount || 1;
-                        autoCloseTime = new Date(autoCloseTime.getTime() + (extensionCount * OVERTIME_EXTENSION_HOURS * 60 * 60 * 1000));
-                    }
-
-                    if (now >= autoCloseTime) {
-                        console.log(`[ShiftScheduler] Auto-closing MORNING shift for ${user.username}`);
-
-                        // Use the scheduled shift end time as the clock-out time (not the auto-close time)
-                        const clockOutTime = endDate;
-
-                        // 1. End active breaks
-                        const activeBreak = await storage.getActiveBreakForDate(user.id, shiftDate);
-                        if (activeBreak) {
-                            const breakDuration = Math.floor((clockOutTime.getTime() - new Date(activeBreak.startTime).getTime()) / 60000);
-                            await storage.updateBreak(activeBreak.id, {
-                                endTime: clockOutTime,
-                                durationMinutes: breakDuration > 0 ? breakDuration : 0
-                            });
-                        }
-
-                        // 2. Set Morning Clock Out to the scheduled shift end time
-                        await storage.updateShift(shift.id, {
-                            morningClockOut: clockOutTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed at scheduled end time"
-                        });
-
-                        // 3. Log Activity
-                        await storage.createActivityLog({
-                            userId: user.id,
-                            action: "shift_auto_close",
-                            details: `Morning shift auto-closed at scheduled end time: ${scheduledEndTime}`,
-                            timestamp: now
-                        });
-
-                        closedCount++;
-                    }
-                }
+                activeEndTime = user.shiftType === 'two_shifts' ? user.morningShiftEnd : user.shiftEndTime;
+                activeStartTime = user.shiftType === 'two_shifts' ? user.morningShiftStart : user.shiftStartTime;
+                activeClockInTime = new Date(shift.morningClockIn);
+                activeShiftPeriod = "morning";
+                activeClockOutField = "morningClockOut";
+            } else if (shift.eveningClockIn && !shift.eveningClockOut) {
+                activeEndTime = user.eveningShiftEnd;
+                activeStartTime = user.eveningShiftStart;
+                activeClockInTime = new Date(shift.eveningClockIn);
+                activeShiftPeriod = "evening";
+                activeClockOutField = "eveningClockOut";
             }
 
-            // --- CHECK EVENING SHIFT ---
-            if (shift.eveningClockIn && !shift.eveningClockOut) {
-                let scheduledEndTime: string | null = null;
-                let scheduledStartTime: string | null = null;
+            if (!activeEndTime || !activeClockInTime || !user.phone) continue;
 
-                if (user.shiftType === 'two_shifts') {
-                    scheduledEndTime = user.eveningShiftEnd;
-                    scheduledStartTime = user.eveningShiftStart;
-                }
+            const fullName = `${user.firstName} ${user.lastName}`;
+            const scheduledEndDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, activeStartTime, activeEndTime, activeClockInTime);
 
-                if (scheduledEndTime) {
-                    // Use the new cross-midnight aware function with scheduledDate
-                    const clockInTime = new Date(shift.eveningClockIn);
-                    const endDate = calculateShiftEndDateTime(shiftDate, shift.scheduledDate || null, scheduledStartTime, scheduledEndTime, clockInTime);
+            // Determine reminder time:
+            // - First reminder: scheduled end time + 1 hour
+            // - After extension: last extension time + 1 hour
+            const extensionCount = shift.overtimeReminderCount || 0;
+            let nextReminderTime: Date;
 
-                    // Calculate effective auto-close time considering overtime extensions
-                    let autoCloseTime = new Date(endDate.getTime() + (AUTO_CLOSE_DELAY_HOURS * 60 * 60 * 1000));
+            if (shift.lastOvertimeExtension && extensionCount > 0) {
+                nextReminderTime = new Date(new Date(shift.lastOvertimeExtension).getTime() + (EXTENSION_REMINDER_DELAY_HOURS * 60 * 60 * 1000));
+            } else {
+                nextReminderTime = new Date(scheduledEndDate.getTime() + (EXTENSION_REMINDER_DELAY_HOURS * 60 * 60 * 1000));
+            }
 
-                    // If employee extended overtime, add extension time
-                    if (shift.lastOvertimeExtension) {
-                        const extensionCount = shift.overtimeReminderCount || 1;
-                        autoCloseTime = new Date(autoCloseTime.getTime() + (extensionCount * OVERTIME_EXTENSION_HOURS * 60 * 60 * 1000));
+            const minutesSinceReminder = (now.getTime() - nextReminderTime.getTime()) / (1000 * 60);
+
+            // Only process if we've passed the next reminder time
+            if (minutesSinceReminder >= 0) {
+                const logs = await storage.getActivityLogsByUser(user.id, shiftDate);
+
+                // Check if reminder was already sent for this cycle
+                const reminderAlreadySent = logs.some(log =>
+                    log.action === "extension_reminder_sent" &&
+                    Math.abs(new Date(log.timestamp).getTime() - nextReminderTime.getTime()) < (EXTENSION_REMINDER_DELAY_HOURS * 60 * 60 * 1000)
+                );
+
+                if (!reminderAlreadySent && minutesSinceReminder < AUTO_CLOSE_AFTER_REMINDER_MINUTES) {
+                    // ============================================================
+                    // SEND EXTENSION REMINDER
+                    // ============================================================
+                    console.log(`[ShiftScheduler] Sending extension reminder to ${user.username} (cycle #${extensionCount + 1})`);
+
+                    const endTimeFormatted = activeEndTime;
+                    const reminderMessage = `If you are still working, please press the "Extend Shift" button on the GAC Tracking app to continue your shift, or it will be auto-closed in 10 minutes with end time ${endTimeFormatted}. If you are not working, please close your shift.`;
+
+                    try {
+                        await sendPersonalWhatsApp(user.phone, reminderMessage, wasenderSettings);
+
+                        if (wasenderSettings.trackingAlertsGroupId) {
+                            await sendGroupWhatsApp(
+                                wasenderSettings.trackingAlertsGroupId,
+                                `[Shift Reminder] ${fullName} received shift extension reminder #${extensionCount + 1}. Shift end time was ${endTimeFormatted}. Auto-close in 10 minutes if not extended.`,
+                                wasenderSettings
+                            );
+                        }
+
+                        await storage.createActivityLog({
+                            userId: user.id,
+                            action: "extension_reminder_sent",
+                            details: `Extension reminder #${extensionCount + 1} sent for ${activeShiftPeriod} shift. Auto-close in 10 min if not extended.`,
+                            timestamp: now
+                        });
+                    } catch (err) {
+                        console.error(`[ShiftScheduler] Failed to send extension reminder to ${user.username}:`, err);
                     }
+                } else if (minutesSinceReminder >= AUTO_CLOSE_AFTER_REMINDER_MINUTES) {
+                    // ============================================================
+                    // AUTO-CLOSE: 10 minutes passed since reminder, no extension
+                    // Check if employee extended AFTER the reminder was sent
+                    // ============================================================
+                    const extendedAfterReminder = shift.lastOvertimeExtension &&
+                        new Date(shift.lastOvertimeExtension).getTime() > nextReminderTime.getTime();
 
-                    if (now >= autoCloseTime) {
-                        console.log(`[ShiftScheduler] Auto-closing EVENING shift for ${user.username}`);
+                    if (!extendedAfterReminder) {
+                        console.log(`[ShiftScheduler] Auto-closing ${activeShiftPeriod.toUpperCase()} shift for ${user.username} (no extension within 10 min)`);
 
-                        // Use the scheduled shift end time as the clock-out time (not the auto-close time)
-                        const clockOutTime = endDate;
+                        const clockOutTime = scheduledEndDate;
 
                         // 1. End active breaks
                         const activeBreak = await storage.getActiveBreakForDate(user.id, shiftDate);
@@ -489,19 +283,33 @@ async function checkAndAutoCloseShifts() {
                             });
                         }
 
-                        // 2. Set Evening Clock Out to the scheduled shift end time
-                        await storage.updateShift(shift.id, {
-                            eveningClockOut: clockOutTime,
-                            notes: (shift.notes ? shift.notes + "\n" : "") + "[System] Auto-closed at scheduled end time"
-                        });
+                        // 2. Close shift with BASE end time
+                        const updateData: any = {
+                            [activeClockOutField]: clockOutTime,
+                            notes: (shift.notes ? shift.notes + "\n" : "") + `[System] Auto-closed with base end time ${activeEndTime} (no extension after reminder)`
+                        };
+                        await storage.updateShift(shift.id, updateData);
 
                         // 3. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
-                            details: `Evening shift auto-closed at scheduled end time: ${scheduledEndTime}`,
+                            details: `${activeShiftPeriod} shift auto-closed with base end time ${activeEndTime}. Employee did not extend within 10 minutes of reminder.`,
                             timestamp: now
                         });
+
+                        // 4. Notify group
+                        if (wasenderSettings.trackingAlertsGroupId) {
+                            try {
+                                await sendGroupWhatsApp(
+                                    wasenderSettings.trackingAlertsGroupId,
+                                    `[Auto-Close] ${fullName}'s ${activeShiftPeriod} shift has been auto-closed with end time ${activeEndTime}. No extension was made within 10 minutes of the reminder.`,
+                                    wasenderSettings
+                                );
+                            } catch (err) {
+                                console.error(`[ShiftScheduler] Failed to send auto-close notification:`, err);
+                            }
+                        }
 
                         closedCount++;
                     }

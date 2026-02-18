@@ -2524,7 +2524,7 @@ export async function registerRoutes(
             const { sendGroupWhatsApp } = await import("./wasender");
             await sendGroupWhatsApp(
               settings.trackingAlertsGroupId,
-              `[Overtime Extended] ${fullName} has confirmed they are still working and extended their overtime window.`,
+              `[Shift Extended] ${fullName} has confirmed they are still working and extended their shift. Next reminder in 1 hour.`,
               settings
             );
           }
@@ -2533,7 +2533,7 @@ export async function registerRoutes(
 
       res.json({
         success: true,
-        message: "Overtime window extended successfully. Auto-close timer has been reset.",
+        message: "Shift extended successfully. You will receive the next reminder in 1 hour.",
         extensionCount: (shift.overtimeReminderCount || 0) + 1,
         extendedAt: now.toISOString(),
       });
