@@ -71,6 +71,7 @@ Preferred communication style: Simple, everyday language.
 - **Saturday Cap**: Required hours capped at 5 hours (300 minutes) on Saturdays regardless of shift configuration
 - **Grace Period**: 15 minutes for late determination
 - **Active Shift Priority**: Shift availability logic prioritizes active shift state (clocked-in without clock-out) over time window calculations. An active shift is ALWAYS unlocked regardless of calculated time windows, preventing cross-midnight reload bugs where evening shifts appeared locked after their scheduled end time.
+- **Shift Extension Reminder Flow**: Scheduled end time + 1h → WhatsApp reminder with 10-min auto-close warning → if no extension within 10 min → auto-close with base scheduled end time → if extended: next reminder in 1h after extension, repeat cycle. Skips open shifts and Saturday. Applies to one-shift and two-shift employees only.
 
 ### Design Patterns
 - **Shared schema**: Database schema and validation schemas defined once in `shared/schema.ts`, used by both frontend and backend
