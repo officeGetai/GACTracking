@@ -290,7 +290,50 @@ async function checkAndAutoCloseShifts() {
                         };
                         await storage.updateShift(shift.id, updateData);
 
-                        // 3. Log Activity
+                        // 3. Add auto-close note to shift report
+                        const autoCloseNote = "Shift is auto closed by the system.";
+                        try {
+                            if (user.shiftType === 'two_shifts') {
+                                const existingReport = await storage.getReportByShiftIdAndType(shift.id, activeShiftPeriod);
+                                if (existingReport) {
+                                    await storage.updateDailyShiftReport(existingReport.id, {
+                                        notes: (existingReport.notes ? existingReport.notes + "\n" : "") + autoCloseNote
+                                    });
+                                    console.log(`[ShiftScheduler] Appended auto-close note to existing ${activeShiftPeriod} report for ${user.username}`);
+                                } else {
+                                    await storage.createDailyShiftReport({
+                                        userId: user.id,
+                                        shiftId: shift.id,
+                                        date: shiftDate,
+                                        workDetails: autoCloseNote,
+                                        month: shiftDate.substring(0, 7),
+                                        shiftType: activeShiftPeriod === "morning" ? "morning" : "evening",
+                                    });
+                                    console.log(`[ShiftScheduler] Created auto-close report for ${user.username} (${activeShiftPeriod})`);
+                                }
+                            } else {
+                                const existingReport = await storage.getReportByShiftId(shift.id);
+                                if (existingReport) {
+                                    await storage.updateDailyShiftReport(existingReport.id, {
+                                        notes: (existingReport.notes ? existingReport.notes + "\n" : "") + autoCloseNote
+                                    });
+                                    console.log(`[ShiftScheduler] Appended auto-close note to existing report for ${user.username}`);
+                                } else {
+                                    await storage.createDailyShiftReport({
+                                        userId: user.id,
+                                        shiftId: shift.id,
+                                        date: shiftDate,
+                                        workDetails: autoCloseNote,
+                                        month: shiftDate.substring(0, 7),
+                                    });
+                                    console.log(`[ShiftScheduler] Created auto-close report for ${user.username}`);
+                                }
+                            }
+                        } catch (reportErr) {
+                            console.error(`[ShiftScheduler] Failed to add auto-close note to report for ${user.username}:`, reportErr);
+                        }
+
+                        // 4. Log Activity
                         await storage.createActivityLog({
                             userId: user.id,
                             action: "shift_auto_close",
