@@ -371,6 +371,8 @@ interface TodayStatus {
   breakCounts: { prayer: number; meal: number; urgent: number };
   activeBreak: Break | null;
   hasSubmittedReport: boolean;
+  hasSubmittedMorningReport: boolean;
+  hasSubmittedEveningReport: boolean;
   currentShiftPeriod?: string;
   dayType?: "full" | "half" | "off";
   isOffDay?: boolean;
@@ -1378,7 +1380,7 @@ export default function EmployeeDashboard() {
   const [loomLinkError, setLoomLinkError] = useState("");
   const [references, setReferences] = useState("");
   const [notes, setNotes] = useState("");
-  const [existingReportId, setExistingReportId] = useState<string | null>(null);
+  
   const [endShiftDialogOpen, setEndShiftDialogOpen] = useState(false);
 
   const { user } = useAuth();
@@ -1401,7 +1403,22 @@ export default function EmployeeDashboard() {
   const breaks = todayStatus?.breaks || [];
   const activeBreak = todayStatus?.activeBreak;
   const isOnBreak = !!activeBreak;
-  const hasSubmittedReport = todayStatus?.hasSubmittedReport || false;
+  const hasSubmittedReport = useMemo(() => {
+    if (!todayStatus) return false;
+    if (isTwoShiftUser) {
+      return activeTab === "morning"
+        ? todayStatus.hasSubmittedMorningReport || false
+        : todayStatus.hasSubmittedEveningReport || false;
+    }
+    return todayStatus.hasSubmittedReport || false;
+  }, [todayStatus, isTwoShiftUser, activeTab]);
+
+  const reportLabel = useMemo(() => {
+    if (isTwoShiftUser) {
+      return activeTab === "morning" ? "Morning Shift Report" : "Evening Shift Report";
+    }
+    return "Shift Report";
+  }, [isTwoShiftUser, activeTab]);
 
   // === SHIFT AVAILABILITY LOGIC ===
   const shiftAvailability = useMemo(() => {
@@ -1576,57 +1593,15 @@ export default function EmployeeDashboard() {
     }
   }, [isMorningUnlocked, isEveningUnlocked, isMorningLocked, isEveningLocked, activeTab]);
 
-  // Fetch existing report when dialog opens
   useEffect(() => {
-    if (reportDialogOpen && hasSubmittedReport && shift?.id) {
-      const fetchReport = async () => {
-        try {
-          const res = await fetch(`/api/reports/daily/shift/${shift.id}`);
-          if (res.ok) {
-            const report = await res.json();
-            if (report) {
-              setExistingReportId(report.id);
-              setReportContent(report.workDetails || "");
-              setNotes(report.notes || "");
-
-              // Parse references
-              try {
-                if (report.references) {
-                  const refs = JSON.parse(report.references);
-                  setReferences(Array.isArray(refs) ? refs[0] || "" : report.references);
-                }
-              } catch {
-                setReferences(report.references || "");
-              }
-
-              // Parse loom videos
-              try {
-                if (report.loomVideos) {
-                  const looms = JSON.parse(report.loomVideos);
-                  setLoomLinks(Array.isArray(looms) ? looms[0] || "" : report.loomVideos);
-                }
-              } catch {
-                setLoomLinks(report.loomVideos || "");
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Failed to fetch existing report:", error);
-        }
-      };
-      fetchReport();
-    } else if (!reportDialogOpen) {
-      // Reset form when dialog closes
-      if (!hasSubmittedReport) {
-        setExistingReportId(null);
-        setReportContent("");
-        setNotes("");
-        setReferences("");
-        setLoomLinks("");
-      }
+    if (!reportDialogOpen) {
+      setReportContent("");
+      setNotes("");
+      setReferences("");
+      setLoomLinks("");
       setLoomLinkError("");
     }
-  }, [reportDialogOpen, hasSubmittedReport, shift?.id]);
+  }, [reportDialogOpen]);
 
   // Calculate break time
   const totalBreakSeconds = useMemo(() => {
@@ -1924,11 +1899,7 @@ export default function EmployeeDashboard() {
       month: format(new Date(), "yyyy-MM")
     };
 
-    const method = existingReportId ? "PATCH" : "POST";
-    const url = existingReportId ? `/api/reports/daily/${existingReportId}` : "/api/reports/daily";
-    const successMsg = existingReportId ? "Report updated successfully" : "Report submitted successfully";
-
-    await handleMutation(apiRequest(method, url, reportData), successMsg, () => {
+    await handleMutation(apiRequest("POST", "/api/reports/daily", reportData), "Report submitted successfully", () => {
       setReportDialogOpen(false);
       queryClient.invalidateQueries({ queryKey: ["/api/employee/today"] });
     });
@@ -2043,13 +2014,13 @@ export default function EmployeeDashboard() {
               Report Required
             </AlertTitle>
             <AlertDescription className="text-amber-700 dark:text-amber-500">
-              You must submit a daily report before ending your {activeTab} shift.
+              You must submit your {reportLabel.toLowerCase()} before ending your {activeTab} shift.
               <Button
                 variant="ghost"
                 onClick={() => setReportDialogOpen(true)}
                 className="ml-2 p-0 h-auto text-amber-700 underline"
               >
-                Submit Report Now
+                Submit {reportLabel} Now
               </Button>
             </AlertDescription>
           </Alert>
@@ -2201,7 +2172,7 @@ export default function EmployeeDashboard() {
                         <TooltipContent>
                           {hasSubmittedReport
                             ? (isOpenShiftUser ? "Close Shift" : "End Shift")
-                            : "Submit report to unlock"
+                            : `Submit ${reportLabel.toLowerCase()} to unlock`
                           }
                         </TooltipContent>
                       </Tooltip>
@@ -2217,7 +2188,7 @@ export default function EmployeeDashboard() {
                     <p className="text-xs text-slate-400 font-medium text-center">
                       {!isStarted && !isCurrentShiftLocked && "Tap to clock in"}
                       {!isStarted && isCurrentShiftLocked && !isOpenShiftUser && currentShiftMessage}
-                      {isActive && !hasSubmittedReport && "Submit report to end shift"}
+                      {isActive && !hasSubmittedReport && `Submit ${reportLabel.toLowerCase()} to end shift`}
                       {isActive && hasSubmittedReport && (isOpenShiftUser ? "Tap to close shift" : "Tap to clock out")}
                       {isEnded && "Shift completed"}
                     </p>
@@ -2354,14 +2325,14 @@ export default function EmployeeDashboard() {
                         <FileText className="w-4 h-4 text-amber-600" />
                       </div>
                       <div>
-                        <CardTitle className="text-base">Daily Report Required</CardTitle>
+                        <CardTitle className="text-base">{reportLabel} Required</CardTitle>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Submit your report to unlock {activeTab} shift ending
+                          Submit your {reportLabel.toLowerCase()} to unlock {activeTab} shift ending
                         </p>
                       </div>
                     </div>
                     <Button onClick={() => setReportDialogOpen(true)} className="gap-2">
-                      <FileCheck className="w-4 h-4" />Submit Report
+                      <FileCheck className="w-4 h-4" />Submit {reportLabel}
                     </Button>
                   </div>
                 </CardHeader>
@@ -2376,22 +2347,12 @@ export default function EmployeeDashboard() {
                       <CheckCircle className="w-5 h-5 text-emerald-600" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium text-emerald-800 dark:text-emerald-400">Report Submitted</p>
+                      <p className="font-medium text-emerald-800 dark:text-emerald-400">{reportLabel} Submitted</p>
                       <p className="text-xs text-emerald-600">You can now end your {activeTab} shift</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setReportDialogOpen(true)}
-                        className="h-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-100"
-                      >
-                        <Edit3 className="w-3.5 h-3.5 mr-1" />Edit
-                      </Button>
-                      <Badge className="bg-emerald-500">
-                        <Unlock className="w-3 h-3 mr-1" />Unlocked
-                      </Badge>
-                    </div>
+                    <Badge className="bg-emerald-500">
+                      <Unlock className="w-3 h-3 mr-1" />Unlocked
+                    </Badge>
                   </div>
                 </CardContent>
               </Card>
@@ -2585,7 +2546,7 @@ export default function EmployeeDashboard() {
                           <FileText className="w-3 h-3 text-purple-600" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Report Submitted</p>
+                          <p className="text-sm font-medium">{reportLabel} Submitted</p>
                           <p className="text-xs text-slate-400">Today</p>
                         </div>
                       </div>
@@ -2631,12 +2592,10 @@ export default function EmployeeDashboard() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-500" />
-                {existingReportId ? "Edit Daily Report" : "Submit Daily Report"}
+                Submit {reportLabel}
               </DialogTitle>
               <DialogDescription>
-                {existingReportId
-                  ? "Update your work summary for today."
-                  : `Submit your report to unlock ${activeTab} shift ending.`}
+                {`Submit your ${reportLabel.toLowerCase()} to unlock ${activeTab} shift ending.`}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -2716,12 +2675,10 @@ export default function EmployeeDashboard() {
               >
                 {isSubmittingReport ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
-                ) : existingReportId ? (
-                  <FileCheck className="w-4 h-4" />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}
-                {existingReportId ? "Update Report" : "Submit Report"}
+                Submit {reportLabel}
               </Button>
             </DialogFooter>
           </DialogContent>

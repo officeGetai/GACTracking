@@ -34,7 +34,8 @@ import {
   Sparkles,
   CalendarDays,
   Search,
-  Edit3,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -247,7 +248,25 @@ function ReportCard({ report, onClick }: { report: any; onClick: () => void }) {
             <p className="text-xs text-slate-500 line-clamp-2">
               {report.workDetails?.substring(0, 100)}...
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              {report.shiftType && (
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[10px] gap-1",
+                    report.shiftType === "morning"
+                      ? "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+                      : "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
+                  )}
+                >
+                  {report.shiftType === "morning" ? (
+                    <Sun className="h-2.5 w-2.5" />
+                  ) : (
+                    <Moon className="h-2.5 w-2.5" />
+                  )}
+                  {report.shiftType === "morning" ? "Morning" : "Evening"}
+                </Badge>
+              )}
               {videos.length > 0 && (
                 <Badge
                   variant="secondary"
@@ -293,7 +312,6 @@ export default function ShiftReportPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
-  const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("submit");
 
   const selectedMonth = `${selectedYear}-${selectedMonthNum}`;
@@ -311,17 +329,39 @@ export default function ShiftReportPage() {
   const [referenceLinkError, setReferenceLinkError] = useState("");
   const [workDetailsError, setWorkDetailsError] = useState("");
 
+  const isTwoShiftUser = user?.shiftType === "two_shifts";
+
   // Get today's status
   const { data: todayStatus, isLoading: statusLoading } = useQuery<{
     shift: Shift | null;
     hasSubmittedReport: boolean;
+    hasSubmittedMorningReport?: boolean;
+    hasSubmittedEveningReport?: boolean;
+    currentShiftPeriod?: string;
   }>({
     queryKey: ["/api/employee/today"],
     refetchInterval: 1000,
   });
 
   const todayShift = todayStatus?.shift;
-  const hasSubmittedReport = todayStatus?.hasSubmittedReport;
+  const currentPeriod = todayStatus?.currentShiftPeriod || "morning";
+
+  const hasSubmittedReport = useMemo(() => {
+    if (!todayStatus) return false;
+    if (isTwoShiftUser) {
+      return currentPeriod === "morning"
+        ? todayStatus.hasSubmittedMorningReport || false
+        : todayStatus.hasSubmittedEveningReport || false;
+    }
+    return todayStatus.hasSubmittedReport || false;
+  }, [todayStatus, isTwoShiftUser, currentPeriod]);
+
+  const reportLabel = useMemo(() => {
+    if (isTwoShiftUser) {
+      return currentPeriod === "morning" ? "Morning Shift Report" : "Evening Shift Report";
+    }
+    return "Shift Report";
+  }, [isTwoShiftUser, currentPeriod]);
 
   // Get all reports for selected month
   const {
@@ -415,12 +455,7 @@ export default function ShiftReportPage() {
         }
       }
 
-      const url = editingReportId
-        ? `/api/reports/daily/${editingReportId}`
-        : "/api/reports/daily";
-      const method = editingReportId ? "PATCH" : "POST";
-
-      const res = await apiRequest(method, url, {
+      const res = await apiRequest("POST", "/api/reports/daily", {
         shiftId: todayShift?.id,
         date: today,
         workDetails: workDetails.trim(),
@@ -437,10 +472,8 @@ export default function ShiftReportPage() {
     },
     onSuccess: () => {
       toast({
-        title: editingReportId ? "Report Updated!" : "Report Submitted!",
-        description: editingReportId
-          ? "Your daily shift report has been updated successfully."
-          : "Your daily shift report has been saved successfully.",
+        title: "Report Submitted!",
+        description: "Your shift report has been saved successfully.",
       });
       resetForm();
       queryClient.invalidateQueries({ queryKey: ["/api/employee/today"] });
@@ -462,7 +495,6 @@ export default function ShiftReportPage() {
     setNotes("");
     setLoomVideos([]);
     setReferences([]);
-    setEditingReportId(null);
     setVideoLinkError("");
     setReferenceLinkError("");
     setWorkDetailsError("");
@@ -566,32 +598,6 @@ export default function ShiftReportPage() {
   const viewReport = (report: any) => {
     setSelectedReport(report);
     setViewDialogOpen(true);
-  };
-
-  const handleEdit = (report: any) => {
-    setEditingReportId(report.id);
-    setWorkDetails(report.workDetails || "");
-    setNotes(report.notes || "");
-    setLoomVideos(safeParseArray(report.loomVideos));
-    setReferences(safeParseArray(report.references));
-    setViewDialogOpen(false);
-    setActiveTab("submit");
-    setVideoLinkError("");
-    setReferenceLinkError("");
-    setWorkDetailsError("");
-    setNewVideoLink("");
-    setNewReference("");
-
-    toast({
-      title: "Edit Mode",
-      description:
-        "You are now editing your report for " +
-        format(parseISO(report.date), "MMM d, yyyy"),
-    });
-  };
-
-  const cancelEdit = () => {
-    resetForm();
   };
 
   const clearFilters = () => {
@@ -726,9 +732,7 @@ export default function ShiftReportPage() {
             <TabsList className="grid w-full max-w-xs grid-cols-2">
               <TabsTrigger value="submit" className="gap-2 text-xs sm:text-sm">
                 <Send className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">
-                  {editingReportId ? "Edit" : "Submit"}
-                </span>{" "}
+                <span className="hidden sm:inline">Submit</span>{" "}
                 Report
               </TabsTrigger>
               <TabsTrigger value="history" className="gap-2 text-xs sm:text-sm">
@@ -798,7 +802,7 @@ export default function ShiftReportPage() {
                             : "text-amber-600 dark:text-amber-400"
                         )}
                       >
-                        Today's Report
+                        {reportLabel} Status
                       </p>
                       <p
                         className={cn(
@@ -844,17 +848,17 @@ export default function ShiftReportPage() {
                   to submit a report.
                 </AlertDescription>
               </Alert>
-            ) : hasSubmittedReport && !editingReportId ? (
+            ) : hasSubmittedReport ? (
               <Card className="border-0 shadow-sm">
                 <CardContent className="p-8 text-center">
                   <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-4">
                     <CheckCircle className="h-8 w-8 text-emerald-500" />
                   </div>
                   <h3 className="text-lg font-semibold mb-2">
-                    Report Already Submitted
+                    {reportLabel} Already Submitted
                   </h3>
                   <p className="text-sm text-muted-foreground mb-4">
-                    You have already submitted your daily report for today.
+                    You have already submitted your {reportLabel.toLowerCase()} for today. Reports cannot be edited after submission.
                   </p>
                   <Button
                     variant="outline"
@@ -874,12 +878,10 @@ export default function ShiftReportPage() {
                     </div>
                     <div>
                       <CardTitle className="text-lg">
-                        {editingReportId ? "Edit" : "Submit"} Report
+                        Submit {reportLabel}
                       </CardTitle>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        {editingReportId
-                          ? `Updating report for ${format(parseISO(selectedReport?.date || today), "EEEE, MMMM d, yyyy")}`
-                          : format(new Date(), "EEEE, MMMM d, yyyy")}
+                        {format(new Date(), "EEEE, MMMM d, yyyy")}
                       </p>
                     </div>
                   </div>
@@ -1127,30 +1129,15 @@ export default function ShiftReportPage() {
                       {submitMutation.isPending ? (
                         <>
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          {editingReportId ? "Updating..." : "Submitting..."}
+                          Submitting...
                         </>
                       ) : (
                         <>
-                          {editingReportId ? (
-                            <FileCheck className="h-4 w-4 mr-2" />
-                          ) : (
-                            <Send className="h-4 w-4 mr-2" />
-                          )}
-                          {editingReportId ? "Update Report" : "Submit Report"}
+                          <Send className="h-4 w-4 mr-2" />
+                          Submit Report
                         </>
                       )}
                     </Button>
-
-                    {editingReportId && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="w-full mt-2"
-                        onClick={cancelEdit}
-                      >
-                        Cancel Editing
-                      </Button>
-                    )}
                   </form>
                 </CardContent>
               </Card>
@@ -1376,7 +1363,27 @@ export default function ShiftReportPage() {
                       <FileText className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                      <p className="text-lg">Daily Report</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-lg">Shift Report</p>
+                        {selectedReport.shiftType && (
+                          <Badge
+                            variant="secondary"
+                            className={cn(
+                              "text-xs gap-1",
+                              selectedReport.shiftType === "morning"
+                                ? "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+                                : "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
+                            )}
+                          >
+                            {selectedReport.shiftType === "morning" ? (
+                              <Sun className="h-3 w-3" />
+                            ) : (
+                              <Moon className="h-3 w-3" />
+                            )}
+                            {selectedReport.shiftType === "morning" ? "Morning Shift" : "Evening Shift"}
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-sm text-muted-foreground font-normal">
                         {format(
                           parseISO(selectedReport.date),
@@ -1486,13 +1493,6 @@ export default function ShiftReportPage() {
                       className="px-6"
                     >
                       Close
-                    </Button>
-                    <Button
-                      onClick={() => handleEdit(selectedReport)}
-                      className="px-6 gap-2"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                      Edit Report
                     </Button>
                   </div>
                 </div>

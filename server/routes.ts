@@ -1540,10 +1540,23 @@ export async function registerRoutes(
       const activityLogs = await storage.getActivityLogsByUser(userId, workingDate);
 
       // Check if report is submitted for today's shift
+      // For two_shift employees, check per-period (morning/evening separately)
       let hasSubmittedReport = false;
+      let hasSubmittedMorningReport = false;
+      let hasSubmittedEveningReport = false;
       if (shift) {
-        const report = await storage.getReportByShiftId(shift.id);
-        hasSubmittedReport = !!report;
+        const user2 = await storage.getUser(userId);
+        if (user2?.shiftType === 'two_shifts') {
+          const morningReport = await storage.getReportByShiftIdAndType(shift.id, 'morning');
+          const eveningReport = await storage.getReportByShiftIdAndType(shift.id, 'evening');
+          hasSubmittedMorningReport = !!morningReport;
+          hasSubmittedEveningReport = !!eveningReport;
+          const isEveningActiveNow = shift.eveningClockIn && !shift.eveningClockOut;
+          hasSubmittedReport = isEveningActiveNow ? hasSubmittedEveningReport : hasSubmittedMorningReport;
+        } else {
+          const report = await storage.getReportByShiftId(shift.id);
+          hasSubmittedReport = !!report;
+        }
       }
 
       // Count breaks by type for working date
@@ -1590,6 +1603,8 @@ export async function registerRoutes(
         totalBreakMinutes,
         activityLogs,
         hasSubmittedReport,
+        hasSubmittedMorningReport,
+        hasSubmittedEveningReport,
         currentDate: workingDate,
         isNewDay,
         lastShiftInfo,
@@ -3092,7 +3107,8 @@ export async function registerRoutes(
     }
   });
 
-  // Update daily report (employee) - PATCH
+  // Update daily report (employee) - PATCH - DISABLED
+  // Employees cannot edit reports after submission
   app.patch("/api/reports/daily/:id", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -3103,13 +3119,14 @@ export async function registerRoutes(
         return res.status(401).json({ error: "User not found" });
       }
 
+      // Only admins can edit reports
+      if (user.role !== 'admin') {
+        return res.status(403).json({ error: "Reports cannot be edited after submission" });
+      }
+
       const report = await storage.getDailyShiftReport(id);
       if (!report) {
         return res.status(404).json({ error: "Report not found" });
-      }
-
-      if (report.userId !== userId) {
-        return res.status(403).json({ error: "Not authorized to edit this report" });
       }
 
       // ============================================
