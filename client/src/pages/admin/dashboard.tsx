@@ -429,6 +429,82 @@ function DepartmentLateWarning({ lateEmployees }: { lateEmployees: LateEmployee[
   );
 }
 
+// Helper to get per-period status label
+function getPeriodStatus(clockIn: string | Date | null, clockOut: string | Date | null): string {
+  if (!clockIn) return "Not Started";
+  if (clockIn && !clockOut) return "Working";
+  return "Completed";
+}
+
+function getPeriodStatusColor(clockIn: string | Date | null, clockOut: string | Date | null) {
+  if (!clockIn) return { text: "text-slate-400 dark:text-slate-500", bg: "bg-slate-100 dark:bg-slate-700/50", dot: "bg-slate-400" };
+  if (clockIn && !clockOut) return { text: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-100 dark:bg-emerald-900/30", dot: "bg-emerald-500" };
+  return { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-100 dark:bg-blue-900/30", dot: "bg-blue-500" };
+}
+
+// Shift Period Detail Row (for two-shift employees)
+function ShiftPeriodDetail({
+  label,
+  icon: Icon,
+  iconColor,
+  clockIn,
+  clockOut,
+  breaks,
+}: {
+  label: string;
+  icon: any;
+  iconColor: string;
+  clockIn: string | Date | null;
+  clockOut: string | Date | null;
+  breaks: any[];
+}) {
+  const periodStatus = getPeriodStatus(clockIn, clockOut);
+  const colors = getPeriodStatusColor(clockIn, clockOut);
+  const totalBreakMins = breaks.reduce((sum, b) => sum + (b.durationMinutes || 0), 0);
+
+  let workMinutes = 0;
+  if (clockIn) {
+    const start = new Date(clockIn);
+    const end = clockOut ? new Date(clockOut) : new Date();
+    workMinutes = Math.floor((end.getTime() - start.getTime()) / 60000) - totalBreakMins;
+    if (workMinutes < 0) workMinutes = 0;
+  }
+  const hours = Math.floor(workMinutes / 60);
+  const mins = workMinutes % 60;
+
+  return (
+    <div className="flex items-center flex-wrap gap-1.5 text-[10px] text-slate-500">
+      <span className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded font-bold", colors.bg, colors.text)}>
+        <Icon className={cn("h-3 w-3", iconColor)} />
+        {label}: {periodStatus}
+      </span>
+      {clockIn && (
+        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30">
+          <LogIn className="h-2.5 w-2.5 text-emerald-500" />
+          <span className="font-mono text-emerald-700 dark:text-emerald-300">{formatTime(clockIn)}</span>
+        </span>
+      )}
+      {clockOut && (
+        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30">
+          <LogOut className="h-2.5 w-2.5 text-blue-500" />
+          <span className="font-mono text-blue-700 dark:text-blue-300">{formatTime(clockOut)}</span>
+        </span>
+      )}
+      {clockIn && workMinutes > 0 && (
+        <span className="font-semibold text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50">
+          {hours}h {mins}m
+        </span>
+      )}
+      {breaks.length > 0 && (
+        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30">
+          <Coffee className="h-2.5 w-2.5 text-amber-500" />
+          <span className="text-amber-700 dark:text-amber-300">{breaks.length}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 // Employee Row
 function EmployeeRow({
   employee,
@@ -444,8 +520,7 @@ function EmployeeRow({
   const statusLabel = lateInfo ? `${formatLateTime(lateInfo.lateMinutes)} Late` : status.label;
 
   const workHours = getWorkHours(shift);
-  const clockIn = shift?.morningClockIn || shift?.eveningClockIn;
-  const clockOut = shift?.morningClockOut || shift?.eveningClockOut;
+  const isTwoShift = employee.shiftType === "two_shifts";
 
   const isLate = !!lateInfo;
   const isWorking = status.type === "working";
@@ -453,6 +528,9 @@ function EmployeeRow({
   const isCompleted = status.type === "completed";
 
   const StatusIcon = status.icon;
+
+  const morningBreaks = shift?.breaks?.filter(b => b.shiftPeriod === "morning") || [];
+  const eveningBreaks = shift?.breaks?.filter(b => b.shiftPeriod === "evening") || [];
 
   const getCardBackground = () => {
     if (isWorking) return "bg-gradient-to-r from-emerald-50 to-teal-50/50 dark:from-emerald-950/30 dark:to-teal-950/20 border-emerald-200/60 dark:border-emerald-800/40";
@@ -499,84 +577,74 @@ function EmployeeRow({
             </p>
           </div>
 
-          {/* Status Badge */}
-          <div className={cn(
-            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold mb-1.5",
-            status.bgColor, status.color, "border", status.borderColor,
-            isLate && "animate-pulse"
-          )}>
-            <StatusIcon className={cn("h-3 w-3", isWorking && "animate-pulse")} />
-            {statusLabel}
-          </div>
-
-          {/* Details */}
-          <div className="flex items-center flex-wrap gap-2 text-[10px] text-slate-500">
-            {/* Schedule */}
-            {(employee.morningShiftStart || employee.eveningShiftStart || employee.shiftStartTime) && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center gap-1 cursor-help px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50">
-                    <Clock className="h-3 w-3" />
-                    <span className="font-mono">
-                      {employee.morningShiftStart || employee.shiftStartTime || employee.eveningShiftStart}
-                    </span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  <div className="space-y-1">
-                    {(employee.morningShiftStart || employee.shiftStartTime) && (
-                      <div className="flex items-center gap-2">
-                        <Sun className="h-3 w-3 text-amber-500" />
-                        <span>
-                          {employee.shiftType === "one_shift" ? "Shift" : "Morning"}: {employee.morningShiftStart || employee.shiftStartTime} - {employee.morningShiftEnd || employee.shiftEndTime || "—"}
-                        </span>
-                      </div>
-                    )}
-                    {employee.shiftType === "two_shifts" && employee.eveningShiftStart && (
-                      <div className="flex items-center gap-2">
-                        <Moon className="h-3 w-3 text-indigo-500" />
-                        <span>Evening: {employee.eveningShiftStart} - {employee.eveningShiftEnd || "—"}</span>
-                      </div>
-                    )}
-                    {employee.shiftType === "open" && (
-                      <div className="text-slate-400">Flexible/Open shift</div>
-                    )}
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            )}
-
-            {/* Clock In */}
-            {clockIn && (
-              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30">
-                <LogIn className="h-3 w-3 text-emerald-500" />
-                <span className="font-mono text-emerald-700 dark:text-emerald-300">{formatTime(clockIn)}</span>
-              </span>
-            )}
-
-            {/* Clock Out */}
-            {clockOut && (
-              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30">
-                <LogOut className="h-3 w-3 text-blue-500" />
-                <span className="font-mono text-blue-700 dark:text-blue-300">{formatTime(clockOut)}</span>
-              </span>
-            )}
-
-            {/* Work Hours */}
+          {/* Overall Status Badge */}
+          <div className="flex items-center gap-2 mb-1.5">
+            <div className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold",
+              status.bgColor, status.color, "border", status.borderColor,
+              isLate && "animate-pulse"
+            )}>
+              <StatusIcon className={cn("h-3 w-3", isWorking && "animate-pulse")} />
+              {statusLabel}
+            </div>
             {workHours.total > 0 && (
-              <span className="font-semibold text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50">
-                ⏱ {workHours.formatted}
-              </span>
-            )}
-
-            {/* Breaks */}
-            {shift?.breaks && shift.breaks.length > 0 && (
-              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30">
-                <Coffee className="h-3 w-3 text-amber-500" />
-                <span className="text-amber-700 dark:text-amber-300">{shift.breaks.length}</span>
+              <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50">
+                {workHours.formatted}
               </span>
             )}
           </div>
+
+          {/* Two-shift details: show morning and evening separately */}
+          {isTwoShift ? (
+            <div className="space-y-1">
+              <ShiftPeriodDetail
+                label="Morning"
+                icon={Sun}
+                iconColor="text-amber-500"
+                clockIn={shift?.morningClockIn || null}
+                clockOut={shift?.morningClockOut || null}
+                breaks={morningBreaks}
+              />
+              <ShiftPeriodDetail
+                label="Evening"
+                icon={Moon}
+                iconColor="text-indigo-500"
+                clockIn={shift?.eveningClockIn || null}
+                clockOut={shift?.eveningClockOut || null}
+                breaks={eveningBreaks}
+              />
+            </div>
+          ) : (
+            /* One-shift / open shift: single row of details */
+            <div className="flex items-center flex-wrap gap-2 text-[10px] text-slate-500">
+              {(employee.shiftStartTime || employee.morningShiftStart) && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50">
+                  <Clock className="h-3 w-3" />
+                  <span className="font-mono">
+                    {employee.shiftStartTime || employee.morningShiftStart}
+                  </span>
+                </span>
+              )}
+              {(shift?.morningClockIn || shift?.eveningClockIn) && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30">
+                  <LogIn className="h-3 w-3 text-emerald-500" />
+                  <span className="font-mono text-emerald-700 dark:text-emerald-300">{formatTime(shift?.morningClockIn || shift?.eveningClockIn)}</span>
+                </span>
+              )}
+              {(shift?.morningClockOut || shift?.eveningClockOut) && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30">
+                  <LogOut className="h-3 w-3 text-blue-500" />
+                  <span className="font-mono text-blue-700 dark:text-blue-300">{formatTime(shift?.morningClockOut || shift?.eveningClockOut)}</span>
+                </span>
+              )}
+              {shift?.breaks && shift.breaks.length > 0 && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30">
+                  <Coffee className="h-3 w-3 text-amber-500" />
+                  <span className="text-amber-700 dark:text-amber-300">{shift.breaks.length}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Actions */}

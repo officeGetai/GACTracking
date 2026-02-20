@@ -653,22 +653,41 @@ export class DatabaseStorage implements IStorage {
 
   async getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]> {
     // Use Pakistan timezone for correct date
-    const today = new Intl.DateTimeFormat('en-CA', {
+    const calendarToday = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Karachi',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit'
     }).format(new Date());
 
-    // Also get yesterday's date for cross-midnight active shifts
-    const yesterday = new Intl.DateTimeFormat('en-CA', {
+    // 9 AM day-reset logic: before 9 AM PKT, the working day is still yesterday
+    const pktHour = parseInt(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Karachi',
+      hour: '2-digit',
+      hour12: false
+    }).format(new Date()), 10);
+
+    const calendarYesterday = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Karachi',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit'
     }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
-    console.log(`[getTodayShifts] Fetching shifts for date: ${today} (Pakistan Time), also checking yesterday: ${yesterday}`);
+    // Before 9 AM PKT, the working date is yesterday (shifts haven't rolled over yet)
+    // But we still check calendarYesterday for cross-midnight active shifts
+    const today = pktHour < 9 ? calendarYesterday : calendarToday;
+    // For cross-midnight active shifts: always include calendarYesterday
+    // When before 9 AM, also include the day before yesterday for any lingering active shifts
+    const dayBeforeYesterday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
+    const yesterday = pktHour < 9 ? dayBeforeYesterday : calendarYesterday;
+
+    console.log(`[getTodayShifts] PKT hour: ${pktHour}, working date: ${today}, yesterday: ${yesterday}`);
 
     const shiftSelect = {
         id: shifts.id,
@@ -744,7 +763,7 @@ export class DatabaseStorage implements IStorage {
     }
     const dedupedRecords = Array.from(userShiftMap.values());
 
-    console.log(`[getTodayShifts] Found ${dedupedRecords.length} shifts (${records.length} raw, today=${today}, yesterday=${yesterday})`);
+    console.log(`[getTodayShifts] Found ${dedupedRecords.length} shifts (${records.length} raw, workingDate=${today}, yesterday=${yesterday})`);
 
     // Fetch breaks for all shifts
     const shiftIds = dedupedRecords.map(r => r.id);
