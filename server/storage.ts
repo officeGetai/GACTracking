@@ -652,7 +652,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTodayShifts(): Promise<(Shift & { user: SafeUser; breaks: Break[] })[]> {
-    // ✅ FIX: Use Pakistan timezone for correct date
+    // Use Pakistan timezone for correct date
     const today = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Karachi',
       year: 'numeric',
@@ -660,10 +660,17 @@ export class DatabaseStorage implements IStorage {
       day: '2-digit'
     }).format(new Date());
 
-    console.log(`[getTodayShifts] Fetching shifts for date: ${today} (Pakistan Time)`);
+    // Also get yesterday's date for cross-midnight active shifts
+    const yesterday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
-    const records = await db
-      .select({
+    console.log(`[getTodayShifts] Fetching shifts for date: ${today} (Pakistan Time), also checking yesterday: ${yesterday}`);
+
+    const shiftSelect = {
         id: shifts.id,
         userId: shifts.userId,
         date: shifts.date,
@@ -705,21 +712,48 @@ export class DatabaseStorage implements IStorage {
           isActive: users.isActive,
           createdAt: users.createdAt,
         },
-      })
+    };
+
+    const records = await db
+      .select(shiftSelect)
       .from(shifts)
       .leftJoin(users, eq(shifts.userId, users.id))
-      .where(eq(shifts.date, today));
+      .where(
+        or(
+          eq(shifts.date, today),
+          // Include yesterday's shifts that are still active (cross-midnight)
+          and(
+            eq(shifts.date, yesterday),
+            or(
+              // Morning shift still active from yesterday
+              and(isNotNull(shifts.morningClockIn), isNull(shifts.morningClockOut)),
+              // Evening shift still active from yesterday
+              and(isNotNull(shifts.eveningClockIn), isNull(shifts.eveningClockOut))
+            )
+          )
+        )
+      );
 
-    console.log(`[getTodayShifts] Found ${records.length} shifts for ${today}`);
+    // Deduplicate: if same user has both today's and yesterday's shift, prefer today's
+    const userShiftMap = new Map<string, typeof records[0]>();
+    for (const record of records) {
+      const existing = userShiftMap.get(record.userId);
+      if (!existing || record.date === today) {
+        userShiftMap.set(record.userId, record);
+      }
+    }
+    const dedupedRecords = Array.from(userShiftMap.values());
+
+    console.log(`[getTodayShifts] Found ${dedupedRecords.length} shifts (${records.length} raw, today=${today}, yesterday=${yesterday})`);
 
     // Fetch breaks for all shifts
-    const shiftIds = records.map(r => r.id);
+    const shiftIds = dedupedRecords.map(r => r.id);
     const allBreaks = shiftIds.length > 0
       ? await db.select().from(breaks).where(inArray(breaks.shiftId, shiftIds))
       : [];
 
     // Merge breaks into shifts
-    const shiftsWithBreaks = records.map(shift => ({
+    const shiftsWithBreaks = dedupedRecords.map(shift => ({
       ...shift,
       breaks: allBreaks.filter(b => b.shiftId === shift.id),
     }));
