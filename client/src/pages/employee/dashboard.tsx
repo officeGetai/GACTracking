@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format, differenceInSeconds, subHours, addDays, subDays } from "date-fns";
 import {
@@ -1373,6 +1373,7 @@ export default function EmployeeDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const currentHour = new Date().getHours();
   const [activeTab, setActiveTab] = useState<"morning" | "evening">(currentHour >= 15 ? "evening" : "morning");
+  const [hasInitializedTab, setHasInitializedTab] = useState(false);
   const [selectedBreakType, setSelectedBreakType] = useState<string>("");
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportContent, setReportContent] = useState("");
@@ -1398,6 +1399,34 @@ export default function EmployeeDashboard() {
     queryKey: ["/api/employee/today"],
     refetchInterval: 5000, // Refresh every 5 seconds
   });
+
+  // Sync activeTab with backend's active shift period
+  // On first load, set tab to the active shift; on subsequent refreshes,
+  // auto-switch only when a shift becomes newly active
+  const prevShiftRef = useRef<{ morningActive: boolean; eveningActive: boolean } | null>(null);
+  useEffect(() => {
+    if (!todayStatus || !isTwoShiftUser) return;
+    const isEveningActive = !!(todayStatus.shift?.eveningClockIn && !todayStatus.shift?.eveningClockOut);
+    const isMorningActive = !!(todayStatus.shift?.morningClockIn && !todayStatus.shift?.morningClockOut);
+
+    if (!hasInitializedTab) {
+      if (isEveningActive) {
+        setActiveTab("evening");
+      } else if (isMorningActive) {
+        setActiveTab("morning");
+      } else if (todayStatus.currentShiftPeriod === "evening") {
+        setActiveTab("evening");
+      }
+      setHasInitializedTab(true);
+    } else if (prevShiftRef.current) {
+      if (isEveningActive && !prevShiftRef.current.eveningActive) {
+        setActiveTab("evening");
+      } else if (isMorningActive && !prevShiftRef.current.morningActive) {
+        setActiveTab("morning");
+      }
+    }
+    prevShiftRef.current = { morningActive: isMorningActive, eveningActive: isEveningActive };
+  }, [todayStatus, isTwoShiftUser, hasInitializedTab]);
 
   const shift = todayStatus?.shift;
   const breaks = todayStatus?.breaks || [];
@@ -1603,9 +1632,16 @@ export default function EmployeeDashboard() {
     }
   }, [reportDialogOpen]);
 
-  // Calculate break time
+  // Calculate break time - filter by active shift period for two-shift users
+  const periodBreaks = useMemo(() => {
+    if (isTwoShiftUser) {
+      return breaks.filter(b => b.shiftPeriod === activeTab);
+    }
+    return breaks;
+  }, [breaks, isTwoShiftUser, activeTab]);
+
   const totalBreakSeconds = useMemo(() => {
-    return breaks.reduce((acc, b) => {
+    return periodBreaks.reduce((acc, b) => {
       if (b.endTime) {
         return acc + differenceInSeconds(new Date(b.endTime), new Date(b.startTime));
       } else if (b.startTime) {
@@ -1613,7 +1649,7 @@ export default function EmployeeDashboard() {
       }
       return acc;
     }, 0);
-  }, [breaks, currentTime]);
+  }, [periodBreaks, currentTime]);
 
   // Current shift times based on active tab
   const currentStart = activeTab === "morning" ? shift?.morningClockIn : shift?.eveningClockIn;
@@ -1667,29 +1703,28 @@ export default function EmployeeDashboard() {
       if (diff < 0) diff += 24 * 3600;
       target = diff;
     } else if (user?.shiftType === "two_shifts") {
-      let total = 0;
-      if (user.morningShiftStart && user.morningShiftEnd) {
+      if (activeTab === "morning" && user.morningShiftStart && user.morningShiftEnd) {
         const start = new Date(`1970-01-01T${user.morningShiftStart}`);
         const end = new Date(`1970-01-01T${user.morningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
         if (diff < 0) diff += 24 * 3600;
-        if (diff > 0) total += diff;
-      }
-      if (user.eveningShiftStart && user.eveningShiftEnd) {
+        target = diff > 0 ? diff : 4 * 3600;
+      } else if (activeTab === "evening" && user.eveningShiftStart && user.eveningShiftEnd) {
         const start = new Date(`1970-01-01T${user.eveningShiftStart}`);
         const end = new Date(`1970-01-01T${user.eveningShiftEnd}`);
         let diff = (end.getTime() - start.getTime()) / 1000;
         if (diff < 0) diff += 24 * 3600;
-        if (diff > 0) total += diff;
+        target = diff > 0 ? diff : 4 * 3600;
+      } else {
+        target = 4 * 3600;
       }
-      target = total > 0 ? total : 8 * 3600;
     }
 
     if (isHalfDayToday) {
       target = Math.min(target, saturdayMaxSeconds);
     }
     return target;
-  }, [user, todayStatus?.isHalfDay, saturdayMaxSeconds]);
+  }, [user, todayStatus?.isHalfDay, saturdayMaxSeconds, activeTab, isOpenShiftUser]);
 
   const targetHoursString = useMemo(() => {
     return `${Math.round(totalTargetSeconds / 3600 * 10) / 10}h`;

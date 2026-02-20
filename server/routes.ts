@@ -74,8 +74,15 @@ function calcTimeDiffMinutes(startTime: string, endTime: string): number {
   return diff;
 }
 
-function getShiftRequiredMinutes(user: any, shiftPeriod: 'morning' | 'evening' | 'full'): number {
-  const isSaturday = isSaturdayInPakistan();
+function getShiftRequiredMinutes(user: any, shiftPeriod: 'morning' | 'evening' | 'full', workingDate?: string): number {
+  // Use working date to determine Saturday, falling back to current calendar day
+  let isSaturday: boolean;
+  if (workingDate) {
+    const d = new Date(workingDate + "T12:00:00");
+    isSaturday = d.getDay() === 6;
+  } else {
+    isSaturday = isSaturdayInPakistan();
+  }
   const saturdayCap = 300; // 5 hours in minutes
 
   if (user.shiftType === 'two_shifts') {
@@ -1529,6 +1536,7 @@ export async function registerRoutes(
       const isMorningActive = shift?.morningClockIn && !shift?.morningClockOut;
       const isEveningActive = shift?.eveningClockIn && !shift?.eveningClockOut;
       const activePeriod = isEveningActive ? "evening" : "morning";
+      const currentShiftPeriod = isEveningActive ? "evening" : "morning";
 
       // Get active break (only for working date)
       const activeBreak = await storage.getActiveBreakForDate(userId, workingDate);
@@ -1539,14 +1547,16 @@ export async function registerRoutes(
       // Get activity logs for working date
       const activityLogs = await storage.getActivityLogsByUser(userId, workingDate);
 
+      // Get user's shift configuration (needed for report checks and break filtering)
+      const user = await storage.getUser(userId);
+
       // Check if report is submitted for today's shift
       // For two_shift employees, check per-period (morning/evening separately)
       let hasSubmittedReport = false;
       let hasSubmittedMorningReport = false;
       let hasSubmittedEveningReport = false;
       if (shift) {
-        const user2 = await storage.getUser(userId);
-        if (user2?.shiftType === 'two_shifts') {
+        if (user?.shiftType === 'two_shifts') {
           const morningReport = await storage.getReportByShiftIdAndType(shift.id, 'morning');
           const eveningReport = await storage.getReportByShiftIdAndType(shift.id, 'evening');
           hasSubmittedMorningReport = !!morningReport;
@@ -1559,18 +1569,19 @@ export async function registerRoutes(
         }
       }
 
-      // Count breaks by type for working date
+      // Count breaks by type - for two-shift users, filter by current active period
+      // Fallback to all breaks if currentShiftPeriod is not determined
+      const periodFilteredBreaks = (user?.shiftType === 'two_shifts' && currentShiftPeriod)
+        ? breaks.filter(b => b.shiftPeriod === currentShiftPeriod)
+        : breaks;
       const breakCounts = {
-        prayer: breaks.filter(b => b.type === "prayer").length,
-        meal: breaks.filter(b => b.type === "meal").length,
-        urgent: breaks.filter(b => b.type === "urgent").length,
+        prayer: periodFilteredBreaks.filter(b => b.type === "prayer").length,
+        meal: periodFilteredBreaks.filter(b => b.type === "meal").length,
+        urgent: periodFilteredBreaks.filter(b => b.type === "urgent").length,
       };
 
-      // Calculate total break duration
-      const totalBreakMinutes = breaks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
-
-      // Get user's shift configuration
-      const user = await storage.getUser(userId);
+      // Calculate total break duration (period-filtered)
+      const totalBreakMinutes = periodFilteredBreaks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
 
       // Calculate next reset time
       let nextResetTime: string | null = null;
@@ -1583,14 +1594,15 @@ export async function registerRoutes(
       }
 
       // Determine break limits based on user's shift type and current period
-      const currentShiftPeriod = isEveningActive ? "evening" : "morning";
       const userShiftType = (user?.shiftType || "one_shift") as keyof typeof BREAK_LIMITS_BY_SHIFT_TYPE;
       const shiftBreakLimits = BREAK_LIMITS_BY_SHIFT_TYPE[userShiftType] || BREAK_LIMITS_BY_SHIFT_TYPE.one_shift;
       const breaksAllowedInCurrentPeriod = (shiftBreakLimits.allowedPeriods as readonly string[]).includes(currentShiftPeriod);
 
-      // Determine day type (full/half/off) based on current date in Pakistan timezone
-      const currentDayOfWeek = getPakistanDayOfWeek() as keyof typeof WORK_SCHEDULE;
-      const daySchedule = WORK_SCHEDULE[currentDayOfWeek];
+      // Determine day type (full/half/off) based on the WORKING DATE (not current calendar day)
+      // This ensures cross-midnight shifts use the correct day type
+      const workingDateObj = new Date(workingDate + "T12:00:00");
+      const workingDayOfWeek = workingDateObj.getDay() as keyof typeof WORK_SCHEDULE;
+      const daySchedule = WORK_SCHEDULE[workingDayOfWeek];
       const dayType = daySchedule.type;
       const isOffDay = dayType === "off";
       const isHalfDay = dayType === "half";
@@ -1956,7 +1968,7 @@ export async function registerRoutes(
 
       if (user) {
         const shiftPeriod = user.shiftType === 'two_shifts' ? 'morning' : 'full';
-        const requiredMinutes = getShiftRequiredMinutes(user, shiftPeriod);
+        const requiredMinutes = getShiftRequiredMinutes(user, shiftPeriod, workingDate);
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
             {
@@ -2235,7 +2247,7 @@ export async function registerRoutes(
       const totalBreakMinutes = eveningBreaks.reduce((sum, b) => sum + (b.durationMinutes || 0), 0);
 
       if (user) {
-        const requiredMinutes = getShiftRequiredMinutes(user, 'evening');
+        const requiredMinutes = getShiftRequiredMinutes(user, 'evening', workingDate);
         getWasenderSettings().then(settings =>
           notifyShiftEnd(
             {
